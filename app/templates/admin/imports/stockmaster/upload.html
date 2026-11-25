@@ -1,0 +1,10 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<p>Upload the global multi-Customer <strong>stock.xls</strong> or a controlled extract. No Calculator Customer selection is required.</p>
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button class="button default" type="submit">Upload</button>
+</form>
+<p>Phase 1 performs validation and read-only reconciliation only.</p>
+{% endblock %}

@@ -1,0 +1,58 @@
+{% extends 'admin/imports/file_base.html' %}
+{% block content %}
+<div class="import-page">
+{% include 'admin/imports/file_navigation.html' with kind='Stock' active='summary' %}
+
+{% if master.status == 'UPLOADED' %}
+<form method="post" action="{% url 'admin:imports_stockmaster_validate' master.pk %}">
+  {% csrf_token %}
+  <button class="button default" type="submit">Validate</button>
+</form>
+{% elif master.status == 'VALIDATION_FAILED' %}
+<p class="errornote">{{ master.error_message }}</p>
+{% endif %}
+
+{% if summary %}
+
+<h2>Validation</h2>
+<p>Rows read: {{ summary.rows_read|default:0 }} · Reader rejected: {{ summary.rows_rejected_by_reader|default:0 }} · Valid rows: {{ summary.rows_valid|default:0 }} · Invalid rows: {{ summary.rows_invalid|default:0 }}</p>
+<p>Unique Customer + SKU identities: {{ summary.unique_customer_skus|default:0 }} · Repeated detail rows: {{ summary.repeated_detail_rows|default:0 }} · Total source quantity: {{ summary.total_quantity|default:0 }}</p>
+
+<h2>Customer resolution</h2>
+<p>
+  LINKED: {{ summary.status_counts.LINKED|default:0 }} ·
+  UNLINKED: {{ summary.status_counts.UNLINKED|default:0 }} ·
+  UNKNOWN_CUSTOMER: {{ summary.status_counts.UNKNOWN_CUSTOMER|default:0 }} ·
+  EMPTY_CUSTOMER: {{ summary.status_counts.EMPTY_CUSTOMER|default:0 }}
+</p>
+<table>
+  <thead><tr><th>Source Customer</th><th>Rows</th><th>Calculator Customer</th><th>Actions</th></tr></thead>
+  <tbody>
+    {% for code, count in summary.customer_counts.items %}
+    <tr>
+      <td>{{ code }}</td><td>{{ count }}</td><td>
+      {% for customer in linked_customers %}{% if customer.code == code %}{{ customer.linked_client.code }}{% endif %}{% endfor %}
+      </td><td>
+      {% if master.status == 'VALIDATED' %}<a href="{% url 'admin:imports_stockmaster_global_details' master.pk %}?customer={% if code == '(empty)' %}{% else %}{{ code|urlencode }}{% endif %}">View file rows</a>{% endif %}
+      {% for customer in linked_customers %}{% if customer.code == code %} · <a href="{% url 'admin:imports_stockmaster_compare' master.pk customer.linked_client.pk %}">Compare customer products</a>{% endif %}{% endfor %}
+      </td>
+    </tr>
+    {% empty %}<tr><td colspan="4">No source rows.</td></tr>{% endfor %}
+  </tbody>
+</table>
+
+{% if summary.warnings %}
+<h2>Warnings</h2>
+<ul>{% for warning in summary.warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+{% endif %}
+{% if summary.invalid_rows %}
+<details><summary>Invalid source rows</summary><pre>{{ summary.invalid_rows }}</pre></details>
+{% endif %}
+{% if summary.reader_rejected %}
+<details><summary>Reader rejected rows</summary><pre>{{ summary.reader_rejected }}</pre></details>
+{% endif %}
+{% endif %}
+
+<p><strong>Read-only reference.</strong> Missing Stock is not zero quantity. Repeated Customer + SKU rows remain as detail. No Products are created or updated.</p>
+</div>
+{% endblock %}

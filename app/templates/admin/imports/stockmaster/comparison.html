@@ -1,0 +1,45 @@
+{% extends 'admin/imports/file_base.html' %}
+{% block content %}
+<div class="import-page">
+{% include 'admin/imports/file_navigation.html' with kind='Stock' active='customer' %}
+<p><strong>Source Customer:</strong> {{ customer.code }} · <strong>Calculator Customer:</strong> {{ client.code }}</p><p>Rows read: {{ master.validation_summary.rows_read }} · Reader rejected: {{ master.validation_summary.rows_rejected_by_reader }}</p>
+<p>Raw Stock rows: {{ summary.raw_rows }} · Unique Stock SKUs: {{ summary.unique_stock_skus }} · Total aggregated quantity: {{ summary.total_quantity }}</p>
+<p>Operational Products: {{ summary.operational_products }} · MATCHED: {{ summary.matched }} · STOCK WITHOUT OPERATIONAL PRODUCT: {{ summary.stock_without_product }} · Ambiguous operational SKUs: {{ summary.ambiguous_products }} · Product without Stock: {{ summary.product_without_stock }}</p>
+
+{% if warnings %}<h2>Warnings</h2><ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>{% endif %}
+
+<h2>Compare and Preview</h2>
+<p>Quantity is summed by Customer + SKU. Weight and cubic remain source references. A difference is shown only when source units and meaning have been confirmed.</p>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th>SKU</th><th>Description</th><th>Status</th><th>Detail rows</th><th>Quantity</th><th>Product weight</th><th>Stock weight</th><th>Weight difference</th><th>Product cubic</th><th>Stock cubic</th><th>Cubic difference</th><th>Warnings</th></tr></thead>
+  <tbody>
+    {% for row in row_page %}
+    <tr>
+      <td>{{ row.sku }}</td><td>{{ row.description }}</td><td>{{ row.status }}</td><td>{{ row.raw_row_count }}</td><td>{{ row.quantity }}</td>
+      <td>{{ row.product_weight|default_if_none:'—' }}</td><td>{{ row.stock_weight_values|default:'—' }}</td><td>{{ row.weight_difference|default_if_none:'Unavailable' }}</td>
+      <td>{{ row.product_cubic|default_if_none:'—' }}</td><td>{{ row.stock_cubic_values|default:'—' }}</td><td>{{ row.cubic_difference|default_if_none:'Unavailable' }}</td>
+      <td>{% for warning in row.warnings %}{{ warning }}<br>{% endfor %}</td>
+    </tr>
+    {% empty %}<tr><td colspan="12">No Stock rows for this Customer.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% if row_page.has_other_pages %}<p>{% if row_page.has_previous %}<a href="?page={{ row_page.previous_page_number }}">Previous</a>{% endif %} Page {{ row_page.number }} of {{ row_page.paginator.num_pages }} {% if row_page.has_next %}<a href="?page={{ row_page.next_page_number }}">Next</a>{% endif %}</p>{% endif %}
+
+<h2>Raw Stock rows</h2>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th>Source row</th><th>Customer</th><th>SKU raw</th><th>SKU normalized</th><th>Description</th><th>Quantity</th><th>Category</th><th>Serial no.</th><th>Weight</th><th>Cubic</th></tr></thead>
+  <tbody>{% for row in raw_page %}<tr><td>{{ row.source_row_number }}</td><td>{{ row.customer_code }}</td><td>{{ row.product_code_raw }}</td><td>{{ row.product_code_normalized }}</td><td>{{ row.description }}</td><td>{{ row.quantity }}</td><td>{{ row.category }}</td><td>{{ row.serial_no }}</td><td>{{ row.weight|default_if_none:'—' }}</td><td>{{ row.cubic|default_if_none:'—' }}</td></tr>{% empty %}<tr><td colspan="10">No raw rows.</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% if raw_page.has_other_pages %}<p>{% if raw_page.has_previous %}<a href="?raw_page={{ raw_page.previous_page_number }}">Previous raw rows</a>{% endif %} Raw page {{ raw_page.number }} of {{ raw_page.paginator.num_pages }} {% if raw_page.has_next %}<a href="?raw_page={{ raw_page.next_page_number }}">Next raw rows</a>{% endif %}</p>{% endif %}
+
+<h2>Product without Stock</h2>
+<p>These rows are informational. Absence from this source does not set quantity to zero.</p>
+<table><thead><tr><th>SKU</th><th>Name</th><th>Weight</th><th>Cubic</th></tr></thead><tbody>{% for product in operational_only_page %}<tr><td>{{ product.sku }}</td><td>{{ product.name }}</td><td>{{ product.weight_kg }}</td><td>{{ product.cubic_m3 }}</td></tr>{% empty %}<tr><td colspan="4">No Product-without-Stock rows.</td></tr>{% endfor %}</tbody></table>
+
+<p><strong>Read-only Phase 1.</strong> No Apply action is available. Product values, Product availability, quote eligibility, and freight calculations are unchanged.</p>
+</div>
+{% endblock %}

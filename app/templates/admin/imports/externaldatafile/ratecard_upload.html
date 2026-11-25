@@ -1,0 +1,92 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p><strong>Quotes do not use these sources.</strong> Reviewing or loading a file does not activate tariffs or change calculator prices.</p>
+{% if form %}
+{% if zone_upload %}
+<p>Select STH and the native zones.csv export. Only the carriers configured for STH are stored when it is loaded.</p>
+{% else %}
+<p>Select STH and the native rates_all.xls export. The complete catalogue is preserved for later applicability review.</p>
+{% endif %}
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+{{ form.as_p }}<input type="submit" value="{% if zone_upload %}Upload and review zones{% else %}Upload and validate structure{% endif %}" class="default">
+</form>
+{% endif %}
+{% if source %}
+<h2>{{ source.original_filename }} — {{ source.get_status_display }}</h2>
+<p>Client: {{ source.client.code }} · Source #{{ source.pk }} · Uploaded: {{ source.uploaded_at }}</p>
+<p>SHA-256: <code>{{ source.sha256 }}</code></p>
+{% if source.error_message %}<p class="errornote">{{ source.error_message }}</p>{% endif %}
+{% if source.file_type == 'RATES' %}
+<p>Worksheet: {{ source.validation_summary.worksheet|default:"—" }} · Header row: {{ source.validation_summary.header_row|default:"—" }}</p>
+<p>Data rows: {{ source.validation_summary.rows_read|default:"0" }} · Master cards: {{ source.validation_summary.master_count|default:"0" }}</p>
+{% endif %}
+<p><strong>Not active for quoting.</strong> {% if source.status == 'ACTIVE' %}This is the version in use for comparison.{% else %}Structural validation does not approve STH card selection, references or charge rules.{% endif %}</p>
+{% for warning in source.validation_summary.warnings %}<p>{{ warning }}</p>{% endfor %}
+
+{% if preview %}
+<h3>Load preview</h3>
+{% if source.file_type == 'RATES' %}
+<p>Lines: {{ preview.rows }} · Cards: {{ preview.cards }} · Values rounded to six decimals: {{ preview.rounded_values }}</p>
+<p>Pointers to cards not in this file ({{ preview.missing_references|length }}):
+{% for value in preview.missing_references %}<code>{{ value }}</code>{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}.</p>
+{% with diagnostics=preview.expression_diagnostics %}
+{% if diagnostics %}
+<h3>Expression diagnostics</h3>
+<p><strong>Catalogue-wide structural review only.</strong> These findings do not prove that a line is reachable for an STH route and do not change quotes.</p>
+<p>Rows requiring interpretation: {{ diagnostics.issue_rows }} · Distinct findings: {{ diagnostics.issue_groups }}{% if diagnostics.groups_truncated %} · {{ diagnostics.groups_truncated }} additional findings not shown{% endif %}</p>
+<p>{% for reason, count in diagnostics.reason_counts.items %}<code>{{ reason }}</code>: {{ count }} row{{ count|pluralize }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+{% if diagnostics.groups %}
+<details>
+<summary>Show all {{ diagnostics.issue_groups }} expression findings</summary>
+<table>
+<thead><tr><th>Reason</th><th>Charge / rule</th><th>Expression</th><th>Occurrences</th><th>Example card / row</th></tr></thead>
+<tbody>
+{% for item in diagnostics.groups %}
+<tr>
+<td><code>{{ item.reason }}</code></td>
+<td>{{ item.name|default:"—" }}</td>
+<td><code>{{ item.expression|default:"—" }}</code></td>
+<td>{{ item.count }}</td>
+<td>{% for example in item.examples %}<code>{{ example.card }} / {{ example.row }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+</details>
+{% else %}<p>No unsupported expressions were found by the current structural parser.</p>{% endif %}
+{% endif %}
+{% endwith %}
+<table>
+<thead><tr><th>Carrier</th><th>Entry card present</th></tr></thead>
+<tbody>{% for carrier, present in preview.carrier_roots.items %}<tr><td>{{ carrier }}</td><td>{{ present|yesno:"Yes,No" }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if preview.compared_with_file_id %}
+<p>Compared with source #{{ preview.compared_with_file_id }}: {{ preview.cards_added.count }} cards added, {{ preview.cards_removed.count }} removed, {{ preview.cards_changed.count }} changed.</p>
+{% if preview.cards_changed.first %}<p>Changed: {% for value in preview.cards_changed.first %}<code>{{ value }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+{% else %}<p>No previous version is loaded.</p>{% endif %}
+{% else %}
+<p>Rows in file: {{ preview.rows_in_file }} · Rows for STH carriers: {{ preview.rows_for_client }}</p>
+<table>
+<thead><tr><th>Carrier</th><th>Rows</th><th>Zones</th><th>Blank zone</th><th>Duplicates</th><th>Ambiguous suburbs</th><th>Conflicts</th></tr></thead>
+<tbody>{% for row in preview.carriers %}<tr><td>{{ row.carrier }}</td><td>{{ row.rows }}</td><td>{{ row.zones }}</td><td>{{ row.blank_zone_rows }}</td><td>{{ row.duplicates }}</td><td>{{ row.ambiguous }}</td><td>{{ row.conflict_count }}</td></tr>{% endfor %}</tbody>
+</table>
+{% if preview.carriers_missing %}<p>STH carriers not in this file: {% for value in preview.carriers_missing %}<code>{{ value }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+{% if preview.compared_with_file_id %}<p>Compared with source #{{ preview.compared_with_file_id }}: {{ preview.rows_added }} rows added, {{ preview.rows_removed }} removed.</p>{% else %}<p>No previous version is loaded.</p>{% endif %}
+{% endif %}
+{% endif %}
+
+{% if source.import_summary.rows_loaded %}<p>Rows stored: {{ source.import_summary.rows_loaded }}</p>{% endif %}
+<ul class="object-tools" style="float:none;margin:12px 0">
+{% if can_prepare %}<li><a href="{% url 'admin:imports_externaldatafile_rate_source_prepare' source.pk %}">Review again</a></li>{% endif %}
+{% if can_load %}<li><a href="{% url 'admin:imports_externaldatafile_rate_source_load' source.pk %}">Load version</a></li>{% endif %}
+{% if can_rollback %}<li><a href="{% url 'admin:imports_externaldatafile_rate_source_rollback' source.pk %}">Roll back</a></li>{% endif %}
+</ul>
+{% if source.file_type == 'RATES' %}
+<p><a class="button" href="{% url 'admin:imports_externaldatafile_rate_pair_diagnostic' source.pk %}">Paired Rates and Zones diagnostic</a></p>
+<p><a href="{% url 'admin:imports_externaldatafile_upload_ratecards' %}">Upload another version</a></p>
+{% else %}
+<p><a href="{% url 'admin:imports_externaldatafile_upload_zones' %}">Upload another version</a></p>
+{% endif %}
+{% endif %}
+<p><a href="{% url 'admin:imports_externaldatafile_changelist' %}">Back to External data files</a></p>
+{% endblock %}

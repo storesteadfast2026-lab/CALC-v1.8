@@ -1,0 +1,36 @@
+{% extends 'admin/imports/file_base.html' %}
+{% block content %}
+<div class="import-page">
+{% include 'admin/imports/file_navigation.html' with kind='Products' active=section %}
+{% if master.status != 'VALIDATED' %}
+<form method="post" action="{% url 'admin:imports_productmaster_validate' master.pk %}">{% csrf_token %}
+  <button class="button default" type="submit">Validate</button>
+</form>
+{% endif %}
+{% if master.error_message %}<p class="errornote">{{ master.error_message }}</p>{% endif %}
+{% if summary %}
+{% if section == 'compare' %}
+<h2>Compare with customer products</h2>
+<p>Select a Calculator Customer to load its current reconciliation. The large Product Master workbook is not re-read automatically on this page.</p>
+<ul>{% for customer in linked_customers %}
+  <li>{{ customer.code }} — {{ customer.name }}:
+    <a class="button" href="{% url 'admin:imports_productmaster_compare' master.pk customer.linked_client_id %}">Compare {{ customer.linked_client.code }}</a>
+  </li>
+{% empty %}<li>No linked Calculator Customers are available for comparison.</li>{% endfor %}</ul>
+<p>Opening a comparison does not change Products. Existing review and explicit import controls remain available inside each customer comparison.</p>
+{% elif section == 'summary' %}
+<h2>Validation overview</h2>
+<p>Rows retained: {{ summary.rows_read }} · Rows without CUSTOMER omitted: {{ summary.rows_omitted_without_customer|default:0 }} · Reader rejected: {{ summary.rows_rejected_by_reader }} · Duplicate CUSTOMER/SKU pairs: {{ summary.duplicate_customer_sku_pairs }}</p>
+<ul>{% for status, count in summary.status_counts.items %}<li>{{ status }}: {{ count }}</li>{% endfor %}</ul>
+<h2>Rows by CUSTOMER</h2>
+<ul>{% for code, count in summary.customer_counts.items %}<li>{{ code }}: {{ count }}</li>{% endfor %}</ul>
+{% elif section == 'rows' %}
+<h2>Preview (first {{ summary.preview_limit }} rows)</h2>
+<p>This is the saved validation preview, not a browser of every row in the file.</p>
+<table><thead><tr><th>Row</th><th>CUSTOMER</th><th>SKU</th><th>Customer name</th><th>Calculator Customer</th><th>Resolution</th></tr></thead>
+<tbody>{% for row in summary.preview %}<tr><td>{{ row.row }}</td><td>{{ row.customer_code|default:'—' }}</td><td>{{ row.sku|default:'—' }}</td><td>{{ row.customer_name|default:'—' }}</td><td>{{ row.calculator_customer|default:'—' }}</td><td>{{ row.status }}</td></tr>{% endfor %}</tbody></table>
+<p>Preview only. No Products or reconciliation were changed.</p>
+{% endif %}
+{% else %}<p>Validate this file to view its summary, row preview and customer comparisons.</p>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+app/uploaded_data/*
+!app/uploaded_data/.gitkeep
+app/ftp_inbox/*
+!app/ftp_inbox/.gitkeep
+app/staticfiles/
+reports/
+uploaded_data/*
+!uploaded_data/.gitkeep
+ftp_inbox/*
+!ftp_inbox/.gitkeep

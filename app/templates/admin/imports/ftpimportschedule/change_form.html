@@ -1,0 +1,254 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls %}
+
+{% block extrahead %}
+{{ block.super }}
+{% include 'admin/imports/navigation_style.html' %}
+<style>
+  .import-centre-intro {
+    margin: 0 0 20px;
+    padding: 14px 16px;
+    border-left: 4px solid var(--primary, #417690);
+    background: var(--darkened-bg, #f4f4f4);
+  }
+  .import-centre-intro p { margin: 4px 0; }
+  .import-centre-section { margin-top: 28px; }
+  .import-centre-section h2 { margin-bottom: 10px; }
+  .import-centre-table { width: 100%; border-collapse: collapse; }
+  .import-centre-table th,
+  .import-centre-table td {
+    padding: 10px;
+    border-bottom: 1px solid var(--hairline-color, #ddd);
+    text-align: left;
+    vertical-align: middle;
+  }
+  .import-centre-table th { background: var(--darkened-bg, #f4f4f4); }
+  .import-centre-actions { min-width: 250px; }
+  .import-centre-actions a,
+  .import-centre-actions button {
+    display: inline-block;
+    margin: 2px 4px 2px 0;
+  }
+  .import-centre-actions form { display: inline; }
+  .import-centre-muted { color: var(--body-quiet-color, #666); }
+  .import-centre-enabled { color: #087c36; font-weight: 700; }
+  .import-centre-disabled { color: var(--body-quiet-color, #666); }
+  .import-centre-operational { color: #087c36; font-weight: 700; }
+  .import-centre-baseline { color: #9a5b00; font-weight: 700; }
+  .import-centre-reference { color: var(--body-quiet-color, #666); font-weight: 700; }
+  .ftp-file-state {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 0 8px;
+    white-space: normal;
+  }
+  .ftp-file-state__indicator {
+    width: 9px;
+    height: 9px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: #777;
+    flex: 0 0 auto;
+  }
+  .ftp-file-state__label { display: block; font-weight: 700; }
+  .ftp-file-state__detail { display: block; max-width: 360px; }
+  .ftp-file-state--ready .ftp-file-state__indicator,
+  .ftp-file-state--success .ftp-file-state__indicator { background: #087c36; }
+  .ftp-file-state--checking .ftp-file-state__indicator { background: #d98200; }
+  .ftp-file-state--warning .ftp-file-state__indicator { background: #b76e00; }
+  .ftp-file-state--error .ftp-file-state__indicator { background: #ba2121; }
+  .ftp-process-button[aria-disabled="true"] {
+    opacity: .55;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  @media (max-width: 767px) {
+    .import-centre-table { display: block; overflow-x: auto; }
+  }
+</style>
+{% endblock %}
+
+{% block form_top %}
+<div class="import-centre-intro">
+  <p><strong>Automatic and manual file imports in one place.</strong></p>
+  <p>
+    <strong>Scheduled</strong> means the FTP file is checked automatically.
+    <strong>Operational status</strong> shows whether that file is actually used by the application.
+  </p>
+  <p><strong>Process from FTP</strong> loads the expected shared file from the Docker FTP inbox and preserves its review controls.</p>
+  <p>
+    Application inbox: <code>{{ ftp_inbox_path }}</code> —
+    {% if ftp_inbox_available %}
+      <span class="import-centre-enabled">available</span>
+    {% else %}
+      <span class="import-centre-baseline">not mounted or unavailable</span>
+    {% endif %}
+  </p>
+</div>
+{% endblock %}
+
+{% block after_field_sets %}
+{{ block.super }}
+
+<section class="import-centre-section" aria-labelledby="import-files-heading">
+  <h2 id="import-files-heading">Files</h2>
+  <p class="help">
+    Select automatic files above and save the schedule. Use Process from FTP to load one expected file immediately.
+  </p>
+  <table class="import-centre-table">
+    <thead>
+      <tr>
+        <th>File</th>
+        <th>Scheduled</th>
+        <th>Last FTP check</th>
+        <th>FTP inbox</th>
+        <th>Latest received</th>
+        <th>Operational status</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in file_rows %}
+      <tr>
+        <td><strong>{{ row.file_type_label }}</strong><br><code>{{ row.filename }}</code></td>
+        <td>
+          {% if row.enabled %}
+            <span class="import-centre-enabled">Scheduled</span><br>
+            <small>{{ row.active_client_count }} active client{{ row.active_client_count|pluralize }}</small>
+          {% else %}
+            <span class="import-centre-disabled">Not scheduled</span>
+          {% endif %}
+        </td>
+        <td>
+          {{ row.last_status }}
+          {% if row.last_checked_at %}<br><small>{{ row.last_checked_at|date:"d M Y H:i" }}</small>{% endif %}
+          {% if row.last_message %}<br><small>{{ row.last_message }}</small>{% endif %}
+        </td>
+        <td>
+          {% if row.source_present %}
+            <span class="import-centre-enabled">File visible</span><br>
+            <small>{{ row.source_size|filesizeformat }}</small>
+          {% else %}
+            <span class="import-centre-baseline">File not visible</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.latest_snapshot %}
+            {{ row.latest_snapshot.get_status_display }}<br>
+            <small>{{ row.latest_snapshot.uploaded_at|date:"d M Y H:i" }} · {{ row.latest_snapshot.client.code }}</small>
+          {% else %}
+            <span class="import-centre-muted">No imports yet</span>
+          {% endif %}
+        </td>
+        <td>
+          <span class="import-centre-{{ row.operational.tone }}">{{ row.operational.label }}</span><br>
+          <small>{{ row.operational.detail }}</small>
+        </td>
+        <td class="import-centre-actions">
+          <div
+            class="ftp-file-state ftp-file-state--{{ row.ftp_status.tone }}"
+            data-ftp-status-url="{{ row.status_url }}"
+            data-filename="{{ row.filename }}"
+            aria-live="polite"
+          >
+            <span class="ftp-file-state__indicator" aria-hidden="true"></span>
+            <span>
+              <span class="ftp-file-state__label">{{ row.ftp_status.label }}</span>
+              <small class="ftp-file-state__detail">{{ row.ftp_status.detail }}</small>
+            </span>
+          </div>
+          <a
+            class="button ftp-process-button"
+            data-process-url="{{ row.upload_url }}"
+            {% if row.ftp_status.can_process %}href="{{ row.upload_url }}" aria-disabled="false"{% else %}aria-disabled="true" tabindex="-1"{% endif %}
+          >Process from FTP</a>
+          {% if row.review_url %}<a class="button" href="{{ row.review_url }}">Open latest file</a>{% endif %}
+          <a class="button" href="{{ row.history_url }}">File history</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="submit-row import-centre-actions">
+    <button type="submit" class="default" formaction="{{ check_inbox_url }}" formmethod="post">Check inbox now</button>
+    <span class="help">Processes all enabled client/file mappings immediately.</span>
+  </div>
+</section>
+
+<section class="import-centre-section" aria-labelledby="recent-imports-heading">
+  <h2 id="recent-imports-heading">Recent imports</h2>
+  <table class="import-centre-table">
+    <thead>
+      <tr>
+        <th>Received</th>
+        <th>Client</th>
+        <th>File</th>
+        <th>Source</th>
+        <th>Status</th>
+        <th>Review</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in recent_imports %}
+      <tr>
+        <td>{{ item.uploaded_at|date:"d M Y H:i" }}</td>
+        <td>{{ item.client.code }}</td>
+        <td>{{ item.original_filename }}</td>
+        <td>{{ item.get_source_method_display }}</td>
+        <td>{{ item.get_status_display }}</td>
+        <td><a href="{% url 'admin:imports_externaldatafile_change' item.pk %}">Review</a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="import-centre-muted">No imports have been registered yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p><a href="{{ import_history_url }}">View full import history</a></p>
+</section>
+
+<script>
+(function () {
+  const widgets = Array.from(document.querySelectorAll('[data-ftp-status-url]'));
+
+  function updateWidget(widget, status) {
+    const label = widget.querySelector('.ftp-file-state__label');
+    const detail = widget.querySelector('.ftp-file-state__detail');
+    const button = widget.parentElement.querySelector('.ftp-process-button');
+
+    widget.className = 'ftp-file-state ftp-file-state--' + status.tone;
+    label.textContent = status.label;
+    detail.textContent = status.detail;
+    button.setAttribute('aria-disabled', status.can_process ? 'false' : 'true');
+    if (status.can_process) {
+      button.href = button.dataset.processUrl;
+      button.removeAttribute('tabindex');
+    } else {
+      button.removeAttribute('href');
+      button.setAttribute('tabindex', '-1');
+    }
+  }
+
+  async function refreshWidget(widget) {
+    try {
+      const response = await fetch(widget.dataset.ftpStatusUrl, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {'Accept': 'application/json'}
+      });
+      if (!response.ok) return;
+      updateWidget(widget, await response.json());
+    } catch (error) {
+      // Keep the last known state visible when a poll temporarily fails.
+    }
+  }
+
+  if (widgets.length) {
+    window.setInterval(function () {
+      widgets.forEach(refreshWidget);
+    }, 3000);
+  }
+}());
+</script>
+{% endblock %}
+

@@ -1,0 +1,71 @@
+{% extends 'admin/imports/file_base.html' %}
+{% block content %}
+<div class="import-page">
+{% include 'admin/imports/file_navigation.html' with kind='Stock' active='compare' %}
+{% if workspace %}
+<p><strong>Product Master:</strong> {{ workspace.product_master.original_filename }} (snapshot #{{ workspace.product_master.pk }})</p><details><summary>Compared Products file — technical details</summary><p><strong>SHA-256:</strong> <code>{{ workspace.product_master.sha256 }}</code></p></details>
+<p>Stock Customer + SKU identities: {{ workspace.stock_keys }} · Source rows retained: {{ workspace.source_rows }} · MATCHED: {{ workspace.totals.MATCHED|default:0 }} · STOCK_ONLY: {{ workspace.totals.STOCK_ONLY|default:0 }} · PRODUCT_MASTER_ONLY: {{ workspace.totals.PRODUCT_MASTER_ONLY|default:0 }} · AMBIGUOUS_PRODUCT_MASTER: {{ workspace.totals.AMBIGUOUS_PRODUCT_MASTER|default:0 }}</p>
+{% if workspace.product_master_incomplete_keys or workspace.product_master_reader_rejected %}<p class="errornote">Product Master rows with incomplete Customer/SKU: {{ workspace.product_master_incomplete_keys }} · Reader rejected: {{ workspace.product_master_reader_rejected }}. These are not valid Customer + SKU identities.</p>{% endif %}
+{% if workspace.product_master_incomplete_keys %}
+<p><a href="{% url 'admin:imports_stockmaster_global_reconciliation' master.pk %}?incomplete=1">View {{ workspace.product_master_incomplete_keys }} incomplete Product Master rows</a></p>
+{% if show_incomplete_rows %}
+<section aria-label="Incomplete Product Master rows">
+<h2>Incomplete Product Master source rows</h2>
+<p>Original worksheet: {{ workspace.product_master_worksheet|default:'Not available' }}. These are original source values, not operational products.</p>
+<div style="overflow-x:auto">
+<table>
+<thead><tr><th>Original row</th><th>CUSTOMER</th><th>CODE (SKU)</th><th>Name</th><th>Description</th><th>Missing field</th></tr></thead>
+<tbody>
+{% for item in workspace.product_master_incomplete_rows %}
+<tr><td>{{ item.source_row_number|default_if_none:'—' }}</td><td>{{ item.customer|default:'(empty)' }}</td><td>{{ item.code|default:'(empty)' }}</td><td>{{ item.name|default:'—' }}</td><td>{{ item.description|default:'—' }}</td><td>{{ item.missing_fields }}</td></tr>
+{% empty %}<tr><td colspan="6">No incomplete rows.</td></tr>{% endfor %}
+</tbody>
+</table>
+</div>
+<p><a href="{% url 'admin:imports_stockmaster_global_reconciliation' master.pk %}">Hide incomplete rows</a></p>
+</section>
+{% endif %}
+{% endif %}
+{% endif %}
+<p><strong>Reference-only reconciliation.</strong> Stock is grouped by source Customer + SKU. Repeated serial rows remain available in the raw browser. No automatic product creation, Customer linking, stock availability changes or physical-value comparisons. Missing Stock is not quantity zero.</p>
+<form method="get">
+  {{ filter_form.non_field_errors }}
+  <p>{{ filter_form.customer.label_tag }} {{ filter_form.customer }} {{ filter_form.customer.errors }}</p>
+  <p>{{ filter_form.sku.label_tag }} {{ filter_form.sku }} {{ filter_form.sku.errors }}</p>
+  <p>{{ filter_form.status.label_tag }} {{ filter_form.status }} {{ filter_form.status.errors }}</p>
+  <button class="button" type="submit">Filter</button>
+  <a href="{% url 'admin:imports_stockmaster_global_reconciliation' master.pk %}">Clear filters</a>
+</form>
+{% if customer_filter_active %}<p>Customer filter active. Empty customer= selects blank source Customers only.</p>{% endif %}
+<p>Matching identities: {{ row_page.paginator.count }} · Page {{ row_page.number }} / {{ row_page.paginator.num_pages }}</p>
+<div style="overflow-x:auto">
+<table>
+<thead><tr><th>Customer</th><th>Customer resolution</th><th>Calculator Customer</th><th>SKU</th><th>Comparison</th><th>Product Master name</th><th>Stock detail rows</th><th>Serialised rows</th><th>Source quantity (reference)</th><th>Raw rows</th></tr></thead>
+<tbody>
+{% for row in row_page %}
+<tr>
+<td>{{ row.customer|default:'(empty)' }}</td>
+<td>{{ row.customer_resolution }}</td>
+<td>{{ row.calculator_customer|default:'—' }}</td>
+<td>{{ row.sku }}</td>
+<td>{{ row.status }}</td>
+<td>{{ row.product_name|default:'—' }}{% if row.product_master_count > 1 %} ({{ row.product_master_count }} duplicates){% endif %}</td>
+<td>{{ row.source_rows }}</td>
+<td>{{ row.serial_rows }}</td>
+<td>{{ row.quantity|default_if_none:'—' }}</td>
+<td>{% if row.source_rows %}<a href="{% url 'admin:imports_stockmaster_global_details' master.pk %}?customer={{ row.customer|urlencode }}&amp;sku={{ row.sku|urlencode }}">View original rows</a>{% else %}—{% endif %}</td>
+</tr>
+{% empty %}<tr><td colspan="10">No matching identities. Check the filters.</td></tr>{% endfor %}
+</tbody>
+</table>
+</div>
+{% if row_page.has_other_pages %}
+<p>
+{% if row_page.has_previous %}<a href="?{% if customer_filter_active %}customer={{ filter_form.customer.value|default_if_none:''|urlencode }}&amp;{% endif %}{% if filter_form.sku.value %}sku={{ filter_form.sku.value|urlencode }}&amp;{% endif %}{% if filter_form.status.value %}status={{ filter_form.status.value|urlencode }}&amp;{% endif %}page={{ row_page.previous_page_number }}">Previous</a>{% endif %}
+Page {{ row_page.number }} of {{ row_page.paginator.num_pages }}
+{% if row_page.has_next %}<a href="?{% if customer_filter_active %}customer={{ filter_form.customer.value|default_if_none:''|urlencode }}&amp;{% endif %}{% if filter_form.sku.value %}sku={{ filter_form.sku.value|urlencode }}&amp;{% endif %}{% if filter_form.status.value %}status={{ filter_form.status.value|urlencode }}&amp;{% endif %}page={{ row_page.next_page_number }}">Next</a>{% endif %}
+</p>
+{% endif %}
+<p><strong>No Apply action.</strong> Stock, Product Master and operational Products remain unchanged.</p>
+</div>
+{% endblock %}

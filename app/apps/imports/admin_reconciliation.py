@@ -1,0 +1,1493 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from collections import Counter
+import csv
+from hashlib import sha256
+import json
+from decimal import Decimal
+from urllib.parse import urlencode
+
+from django.contrib import messages
+from django.db import IntegrityError
+from django.core import signing
+from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
+from django.shortcuts import get_object_or_404, redirect
+from apps.authentication_gateway.services import allowed_clients_for, CalculatorAccessDenied, is_django_administrator
+from django.template.response import TemplateResponse
+from django.urls import reverse
+
+from apps.imports.forms import (
+    ProductReconciliationBulkForm,
+    ProductReconciliationIndividualForm,
+)
+from apps.imports.models import (
+    ExternalDataFile,
+    ProductMaster,
+    ProductCorrectionRound,
+    ProductReconciliationDecision,
+    ProductReconciliationRule,
+    ProductCorrectionDecision,
+    ProductSourceRow,
+)
+from apps.imports.services.product_reconciliation import build_product_reconciliation
+from apps.imports.services.product_master import (
+    reconciliation_rows_for_customer, new_product_warnings,
+    import_new_products_from_master,
+)
+from apps.imports.services.csv_export import safe_csv_cell
+from apps.imports.services.xlsx_reader import SourceImportError
+from apps.clients.models import Client, Customer
+from apps.products.models import Product
+from django.http import Http404, HttpResponse, HttpResponseNotAllowed, JsonResponse
+from apps.imports.services.product_reconciliation_workspace import (
+    ProductReconciliationWorkspaceError,
+    apply_rule_as_draft,
+    build_workspace,
+    field_decisions_from_preset,
+    has_active_product_apply,
+    preview_decision,
+    rows_for_group,
+    save_product_reconciliation_decisions,
+    save_reconciliation_rule,
+    RECONCILABLE_FIELDS,
+)
+from apps.imports.services.product_reconciliation_apply import (
+    ProductReconciliationApplyBlocked,
+    apply_product_reconciliation,
+    build_product_apply_plan,
+    create_recommended_product_drafts,
+    latest_product_apply_batch,
+    rollback_latest_product_apply,
+)
+from apps.imports.services.product_reconciliation_memory import (
+    ProductReconciliationMemoryError,
+    adopt_operational_product_memories,
+    backfill_applied_product_memories,
+    prepare_exact_memory_drafts,
+    reuse_all_exact_product_memories,
+    reuse_product_memories,
+)
+from apps.imports.services.product_correction_rounds import (
+    CorrectionRoundError, start_correction_round, save_correction_decision,
+    correction_preview, apply_correction_round, rollback_correction_round,
+    bulk_dimension_candidates, is_zero_source_dimensions_candidate,
+    save_bulk_operational_dimensions,
+    bulk_field_candidates, save_bulk_field_decisions,
+    save_inline_correction_decisions, corrected_skus_for_source,
+    autosave_correction_field,
+)
+from apps.imports.services.product_issue_report import (
+    ProductIssueReportError,
+    build_product_issue_rows,
+    export_product_issue_workbook,
+    preview_product_issue_workbook,
+    save_product_issue_report_drafts,
+)
+
+
+GROUP_LABELS = {
+    'ALL': 'All rows',
+    'ALL_DIFFERENCES': 'All differences',
+    'SOURCE_DIMENSIONS_ZERO': 'Source dimensions zero',
+    'DIMENSION_UNIT_REVIEW': 'Possible dimension unit mismatch',
+    'MEMORY_EXACT': 'Previously resolved — identical Source',
+    'MEMORY_SOURCE_CHANGED': 'Previous solution — Source changed',
+    'MEMORY_NEW_ISSUE': 'New issue — no previous solution',
+    'MEMORY_RULE_MATCH': 'Approved reusable rule available',
+    'FREIGHT_TYPE_REVIEW': 'C/P requires manual review',
+    'FREIGHT_TYPE_DIFFERENCES': 'C/P differs from pallet rule',
+    'TEXT_ONLY': 'Text differences only',
+    'PHYSICAL_DIFFERENCES': 'Other physical differences',
+    'OTHER_DIFFERENCES': 'Other differences',
+    'SOURCE_ONLY': 'Source only',
+    'OPERATIONAL_ONLY': 'Operational only',
+    'DUPLICATE_SOURCE': 'Duplicate source SKU',
+    'SAME': 'Same',
+}
+
+
+CORRECTION_GROUPS = {
+    'ALL': 'All differences', 'SOURCE_DIMENSIONS_ZERO': 'Source dimensions zero',
+    'DIMENSIONS': 'Dimensions', 'WEIGHT': 'Weight', 'CUBIC': 'Cubic',
+    'MULTIPLE': 'Multiple fields',
+}
+CORRECTION_STATUSES = {
+    'OPEN': 'Open (unreviewed and draft)', 'UNREVIEWED': 'Unreviewed',
+    'DRAFT': 'Draft', 'CORRECTED': 'Already corrected', 'ALL': 'All',
+}
+
+RECONCILIATION_REVIEW_STATUSES = {
+    'NEEDS_REVIEW': 'Needs review',
+    'DRAFT': 'Draft',
+    'PARTIAL': 'Partially reviewed',
+    'APPLIED': 'Applied',
+    'ALL': 'All',
+}
+
+
+def rows_for_review_status(rows, status):
+    """Filter the displayed queue using the already computed per-SKU review state."""
+    if status == 'ALL':
+        return rows
+    if status == 'NEEDS_REVIEW':
+        return [row for row in rows if row['review_state'] in {'needs_review', 'partial'}]
+    return [row for row in rows if row['review_state'] == status.lower()]
+
+
+def filter_correction_rows(rows, *, group='ALL', status='OPEN', query='',
+                           draft_skus=(), corrected_skus=()):
+    """The same row filter serves display and server-side select-all."""
+    group = group if group in CORRECTION_GROUPS else 'ALL'
+    status = status if status in CORRECTION_STATUSES else 'OPEN'
+    draft_skus, corrected_skus = set(draft_skus), set(corrected_skus)
+    query = str(query or '').strip().lower()
+    result = []
+    for row in rows:
+        if row['status'] != 'DIFFERENT' or not row.get('source') or not row.get('product'):
+            continue
+        changed = set(row['changed_fields'])
+        if group == 'SOURCE_DIMENSIONS_ZERO' and not is_zero_source_dimensions_candidate(row):
+            continue
+        if group in {'DIMENSIONS', 'WEIGHT', 'CUBIC'} and group.lower() not in changed:
+            continue
+        if group == 'MULTIPLE' and len(changed) < 2:
+            continue
+        sku = row['sku']
+        if status == 'OPEN' and sku in corrected_skus:
+            continue
+        if status == 'UNREVIEWED' and (sku in corrected_skus or sku in draft_skus):
+            continue
+        if status == 'DRAFT' and sku not in draft_skus:
+            continue
+        if status == 'CORRECTED' and sku not in corrected_skus:
+            continue
+        if query and query not in sku.lower() and query not in str(row['source_values'].get('name') or '').lower() and query not in str(row['operational_values'].get('name') or '').lower():
+            continue
+        result.append(row)
+    return result
+
+
+def correction_table_fields(row, form):
+    """Present the existing six per-field authorities beside both compared values."""
+    spec = {
+        'name': ('Name', ('name',)),
+        'description': ('Description', ('description',)),
+        'dimensions': ('Dimensions (m)', ('length_m', 'width_m', 'height_m')),
+        'weight': ('Weight (kg)', ('weight_kg',)),
+        'cubic': ('Cubic (m³)', ('cubic_m3',)),
+        'freight_type': ('Case/Pallet', ('freight_type',)),
+    }
+    visible, hidden = [], []
+    for field in RECONCILABLE_FIELDS:
+        label, value_keys = spec[field]
+        authority = form[f'{field}_authority']
+        customs = [form[f'custom_{key}'] for key in value_keys]
+        if field in row['changed_fields']:
+            visible.append({
+                'key': field, 'label': label,
+                'source': ' × '.join(str(row['source_values'].get(key, '')) for key in value_keys),
+                'current': ' × '.join(str(row['operational_values'].get(key, '')) for key in value_keys),
+                'authority': authority, 'customs': customs,
+            })
+        else:
+            hidden.extend([authority, *customs])
+    return visible, hidden
+
+
+def reconciliation_progress(source, rows):
+    """Summarise existing decisions without confusing physical differences with open work."""
+    initial = {decision.product_code_normalized: decision for decision in
+               ProductReconciliationDecision.objects.filter(external_file=source)}
+    rounds = list(ProductCorrectionRound.objects.filter(
+        external_file=source, status__in=['DRAFT', 'APPLIED'],
+    ).prefetch_related('decisions').order_by('pk'))
+    current = next((item for item in reversed(rounds) if item.status == 'DRAFT'), None)
+    history = {}
+    for item in rounds:
+        for decision in item.decisions.all():
+            history.setdefault(decision.sku, []).append((item, decision))
+    counts = {'needs_review': 0, 'draft': 0, 'applied': 0, 'partial': 0,
+              'physical': 0, 'draft_decisions': 0}
+    counts['draft_decisions'] = (
+        current.decisions.count() if current else 0
+    ) + sum(d.decision_status in {'DRAFT', 'READY'} for d in initial.values())
+    for row in rows:
+        sku = row['sku']
+        differing = set(row.get('changed_fields') or ())
+        if row['status'] == 'DIFFERENT' and differing & {'dimensions', 'weight', 'cubic'}:
+            counts['physical'] += 1
+        original = initial.get(sku)
+        related = history.get(sku, [])
+        applied_fields = set()
+        draft_fields = set()
+        if original:
+            target = applied_fields if original.decision_status == 'APPLIED' else draft_fields
+            target.update(field for field, choice in original.field_decisions.items()
+                          if choice in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
+        for item, decision in related:
+            target = applied_fields if item.status == 'APPLIED' else draft_fields
+            target.update(field for field, choice in decision.field_decisions.items()
+                          if choice in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
+        reviewed = applied_fields | draft_fields
+        if row['status'] in {'DIFFERENT', 'OPERATIONAL_ONLY', 'DUPLICATE_SOURCE'}:
+            if differing and reviewed & differing and differing - reviewed:
+                state = 'partial'
+            elif (differing and differing - reviewed) or (not differing and not original and not related):
+                state = 'needs_review'
+            elif (original and original.decision_status != 'APPLIED') or any(
+                item.status == 'DRAFT' for item, _ in related
+            ):
+                state = 'draft'
+            else:
+                state = 'applied'
+            counts[state] += 1
+        elif original and original.decision_status == 'APPLIED' or any(
+            item.status == 'APPLIED' for item, _ in related
+        ):
+            state = 'applied'
+            counts['applied'] += 1
+        else:
+            state = 'reference'
+        row['review_state'] = state
+        row['latest_correction_round'] = related[-1][0] if related else None
+        row['pending_fields'] = sorted(differing - reviewed)
+    counts['products_needing_review'] = counts['needs_review'] + counts['partial']
+    counts['open_round'] = current
+    return counts
+
+
+def preview_changed_values(items):
+    """Show only actual changes in both existing Preview flows."""
+    labels = {'length_m': 'Length (m)', 'width_m': 'Width (m)', 'height_m': 'Height (m)',
+              'weight_kg': 'Weight (kg)', 'cubic_m3': 'Cubic (m³)',
+              'freight_type': 'Case/Pallet', 'name': 'Name', 'description': 'Description'}
+    for item in items:
+        current = item['row'].get('operational_values') or {}
+        proposed = item.get('proposed_values') or {}
+        item['changed_values'] = [
+            {'label': labels.get(key, key), 'current': current.get(key), 'proposed': value}
+            for key, value in proposed.items()
+            if str(current.get(key) if current.get(key) is not None else '')
+               != str(value if value is not None else '')
+        ]
+    return items
+
+
+class ReadOnlyReconciliationWorkflow(ABC):
+    """Reusable, paginated comparison workflow with no operational Apply operation."""
+
+    template_name = 'admin/imports/reconciliation.html'
+    page_title = ''
+    page_description = ''
+    page_size = 100
+
+    def __init__(self, admin_site):
+        self.admin_site = admin_site
+
+    @abstractmethod
+    def get_source(self, request, object_id):
+        raise NotImplementedError
+
+    @abstractmethod
+    def build_reconciliation(self, source):
+        raise NotImplementedError
+
+    def has_permission(self, request):
+        return request.user.is_active and request.user.is_staff and (
+            request.user.is_superuser
+            or request.user.has_perm('imports.view_productsourcerow')
+        )
+
+    def __call__(self, request, object_id):
+        if not self.has_permission(request):
+            raise PermissionDenied
+        source = self.get_source(request, object_id)
+        rows, summary = self.build_reconciliation(source)
+        search = str(request.GET.get('q') or '').strip().lower()
+        status = str(request.GET.get('status') or 'NEEDS_REVIEW').upper()
+
+        filtered = rows
+        if status == 'NEEDS_REVIEW':
+            filtered = [row for row in filtered if row['status'] != 'SAME']
+            priority = {
+                'DIFFERENT': 0,
+                'DUPLICATE_SOURCE': 1,
+                'OPERATIONAL_ONLY': 2,
+                'SOURCE_ONLY': 3,
+            }
+            filtered.sort(key=lambda row: (
+                priority.get(row['status'], 9),
+                row['sku'],
+                row['source_row_number'] or 0,
+            ))
+        elif status and status != 'ALL':
+            filtered = [row for row in filtered if row['status'] == status]
+        if search:
+            filtered = [
+                row for row in filtered
+                if search in row['sku'].lower()
+                or search in str(row['source_values'].get('name') or '').lower()
+                or search in str(row['operational_values'].get('name') or '').lower()
+            ]
+
+        page = Paginator(filtered, self.page_size).get_page(request.GET.get('page'))
+        context = {
+            **self.admin_site.each_context(request),
+            'title': self.page_title,
+            'page_description': self.page_description,
+            'source': source,
+            'summary': summary,
+            'page_obj': page,
+            'search': search,
+            'selected_status': status,
+            'result_count': len(filtered),
+            'blocked': summary['pending_rejected'] > 0,
+            'back_url': reverse('admin:imports_externaldatafile_changelist'),
+            'opts': ExternalDataFile._meta,
+        }
+        return TemplateResponse(request, self.template_name, context)
+
+
+class ProductMasterReadOnlyReconciliation(ReadOnlyReconciliationWorkflow):
+    """Show master status within one authorised Client and bridge approved imports."""
+
+    template_name = 'admin/imports/product_master_comparison.html'
+    page_size = 50
+    page_title = 'Product Master reconciliation comparison'
+    page_description = 'Review this Calculator Customer’s Product Master rows.'
+
+    @staticmethod
+    def _global_selection_hash(eligible):
+        """Bind a compact Preview token to every currently eligible SKU."""
+        return sha256(json.dumps(sorted(eligible), ensure_ascii=False).encode('utf-8')).hexdigest()
+
+    def _selection(self, token, master, client, eligible):
+        try:
+            payload = signing.loads(token, salt='product-master-import', max_age=3600)
+        except signing.BadSignature as exc:
+            raise PermissionDenied('Import selection expired or changed.') from exc
+        if (payload.get('master') != master.pk or payload.get('client') != client.pk
+                or payload.get('sha') != master.sha256):
+            raise PermissionDenied('Import selection does not belong to this Customer.')
+        if payload.get('mode') == 'ALL':
+            if (not isinstance(payload.get('count'), int) or payload['count'] < 1
+                    or not isinstance(payload.get('selection_hash'), str)):
+                raise PermissionDenied('Invalid global import selection.')
+            valid = (payload['count'] == len(eligible)
+                     and payload['selection_hash'] == self._global_selection_hash(eligible))
+            return list(eligible), True, valid
+        if payload.get('mode') not in (None, 'STAGE'):
+            raise PermissionDenied('Invalid import selection mode.')
+        selected = payload.get('skus')
+        if (not isinstance(selected, list) or not selected
+                or len(selected) > self.page_size or len(selected) != len(set(selected))):
+            raise PermissionDenied('Invalid import selection.')
+        return selected, False, True
+
+    def _current_stage(self, rows, eligible, *, query='', page=None):
+        """Use the visible Source-only page as the batch boundary."""
+        search = str(query or '').strip().lower()
+        filtered = [row for row in rows if row['status'] == 'SOURCE_ONLY' and (
+            not search or search in row['sku'].lower()
+            or search in str(row['source_values'].get('name') or '').lower()
+        )]
+        current = Paginator(filtered, self.page_size).get_page(page)
+        return [row['sku'] for row in current if row['sku'] in eligible]
+
+    @staticmethod
+    def _import_progress(master, client, eligible):
+        """Count only active CREATE batches whose Product still belongs to this Client."""
+        imported = set()
+        for source in ExternalDataFile.objects.filter(
+            client=client, import_summary__product_master_id=master.pk,
+        ).only('import_summary'):
+            summary = source.import_summary or {}
+            if summary.get('product_master_sha256') != master.sha256:
+                continue
+            for batch in summary.get('product_reconciliation_apply_batches') or []:
+                if batch.get('rolled_back_at'):
+                    continue
+                imported.update(change['sku'] for change in batch.get('changes') or []
+                                if change.get('operation') == 'CREATE')
+        current = set(Product.objects.filter(client=client, sku__in=imported)
+                      .values_list('sku', flat=True))
+        remaining = len(eligible)
+        return {'initial': len(current) + remaining,
+                'imported': len(current), 'remaining': remaining}
+
+    def __call__(self, request, object_id, client_id):
+        if not self.has_permission(request):
+            raise PermissionDenied
+        self.client_id = client_id
+        # Resolve scope before accepting POST selections or reading the global workbook.
+        source = self.get_source(request, object_id)
+        master = source.master
+        customer = source.customer
+        rows, summary = self.build_reconciliation(source)
+        summary['physical_differences'] = sum(
+            row['status'] == 'DIFFERENT' and bool(
+                set(row['changed_fields']) & {'dimensions', 'weight', 'cubic'})
+            for row in rows
+        )
+        invalid_skus = {item['product_code_normalized'] for item in source.invalid_rows}
+        eligible = {}
+        for row in rows:
+            row['import_warnings'] = (
+                new_product_warnings(row, source.client) if row['status'] == 'SOURCE_ONLY' else []
+            )
+            if row['sku'] in invalid_skus:
+                row['import_warnings'].append('Another Source row with this SKU is invalid.')
+            if row['status'] == 'SOURCE_ONLY' and not row['import_warnings']:
+                eligible[row['sku']] = row
+        self._decorate_master_history(rows, source.client)
+        self._master_rows = (rows, summary)
+        review_counts = {state: sum(row.get('review_state') == state for row in rows)
+                         for state in ('needs_review', 'partial', 'draft', 'applied')}
+        progress = self._import_progress(master, source.client, eligible)
+        excluded_source_only = summary['source_only'] - len(eligible)
+        blocked_source_only = [
+            row for row in rows
+            if row['status'] == 'SOURCE_ONLY' and row['import_warnings']
+        ]
+        blocked_reason_counts = dict(sorted(Counter(
+            warning
+            for row in blocked_source_only
+            for warning in row['import_warnings']
+        ).items()))
+        if request.method == 'GET' and request.GET.get('format') == 'blocked_csv':
+            return self._blocked_products_csv(
+                master, source.client, blocked_source_only,
+            )
+        action = request.POST.get('action') if request.method == 'POST' else None
+        if request.method == 'POST' and action not in {'review', 'review_all', 'import'}:
+            return HttpResponseNotAllowed(['GET', 'POST'])
+        if action in {'review', 'review_all', 'import'} and not (
+            request.user.is_superuser or request.user.has_perm('imports.manage_product_reconciliation')
+        ):
+            raise PermissionDenied
+        if action == 'review_all':
+            if not eligible:
+                messages.error(request, 'No eligible Source-only Products remain.')
+                return redirect(request.path + '?status=SOURCE_ONLY')
+            token = signing.dumps({
+                'master': master.pk, 'client': source.client_id, 'sha': master.sha256,
+                'mode': 'ALL', 'count': len(eligible),
+                'selection_hash': self._global_selection_hash(eligible),
+            }, salt='product-master-import', compress=True)
+            return redirect(request.path + '?' + urlencode({'preview': token}))
+        if action == 'review':
+            requested = request.POST.getlist('skus')
+            stage = self._current_stage(
+                rows, eligible, query=request.POST.get('q'), page=request.POST.get('page'))
+            if request.POST.get('select_all') == '1':
+                requested = stage
+            if not requested or len(set(requested)) != len(requested) or set(requested) - set(stage):
+                messages.error(request, 'Select eligible Source-only Products and review again.')
+                return redirect(request.path + '?status=SOURCE_ONLY')
+            token = signing.dumps({'master': master.pk, 'client': source.client_id,
+                                   'sha': master.sha256, 'skus': requested},
+                                  salt='product-master-import', compress=True)
+            return redirect(request.path + '?' + urlencode({'preview': token}))
+        if action == 'import':
+            selected, _global_mode, selection_valid = self._selection(
+                request.POST.get('token', ''), master, source.client, eligible)
+            if request.POST.get('confirmed') != '1':
+                messages.error(request, 'Confirm that you reviewed the proposed Products before Apply.')
+                return redirect(request.path + '?' + urlencode({
+                    'preview': request.POST.get('token', ''),
+                }))
+            if not selection_valid or set(selected) - eligible.keys() or not selected:
+                messages.error(request, 'Source or operational Products changed. Review the selection again.')
+                return redirect(request.path + '?status=SOURCE_ONLY')
+            try:
+                external_file, batch = import_new_products_from_master(
+                    master, customer, selected, actor=request.user, request=request,
+                )
+            except (SourceImportError, ProductReconciliationWorkspaceError,
+                    ProductReconciliationApplyBlocked, IntegrityError) as exc:
+                messages.error(request, 'A Product was created concurrently. Review again.'
+                               if isinstance(exc, IntegrityError) else str(exc))
+                return redirect(request.path + '?status=SOURCE_ONLY')
+            messages.success(request, f'{len(batch["changes"])} new Products imported. '
+                             f'Reconciliation source #{external_file.pk} retains Apply and rollback history.')
+            return redirect(request.path + '?status=SOURCE_ONLY')
+        if request.method != 'GET':
+            return HttpResponseNotAllowed(['GET', 'POST'])
+        response = super().__call__(request, object_id)
+        response.context_data['back_url'] = reverse(
+            'admin:imports_productmaster_change', args=[object_id],
+        ) if is_django_administrator(request.user) else reverse('admin:index')
+        response.context_data['back_label'] = 'Products — Summary'
+        if is_django_administrator(request.user):
+            response.context_data['navigation_master'] = master
+        response.context_data['eligible_count'] = len(eligible)
+        response.context_data['excluded_source_only'] = excluded_source_only
+        response.context_data['blocked_source_only_count'] = len(blocked_source_only)
+        response.context_data['blocked_reason_counts'] = blocked_reason_counts
+        response.context_data['can_import'] = (
+            request.user.is_superuser or request.user.has_perm('imports.manage_product_reconciliation'))
+        response.context_data['progress'] = progress
+        response.context_data['review_counts'] = review_counts
+        response.context_data['stage_eligible_count'] = len(self._current_stage(
+            rows, eligible, query=request.GET.get('q'), page=request.GET.get('page')))
+        response.context_data['invalid_rows'] = source.invalid_rows
+        token = request.GET.get('preview')
+        if token:
+            selected, global_mode, selection_valid = self._selection(
+                token, master, source.client, eligible)
+            preview = ([eligible[sku] for sku in selected if sku in eligible]
+                       if selection_valid else [])
+            response.context_data.update({'preview_token': token, 'preview_rows': preview,
+                                          'preview_is_global': global_mode,
+                                          'preview_invalid': (len(selected) - len(preview)
+                                              if selection_valid else max(1, len(selected) - len(preview)))})
+        return response
+
+    @staticmethod
+    def _blocked_products_csv(master, client, rows):
+        filename = f'blocked_new_products_master_{master.pk}_{client.code}.csv'
+        response = HttpResponse('\ufeff', content_type='text/csv; charset=utf-8')
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        columns = [
+            'product_master_id', 'product_master_sha256', 'calculator_customer',
+            'sku', 'source_row', 'name', 'description',
+            'length_m', 'width_m', 'height_m', 'weight_kg', 'cubic_m3',
+            'quantity', 'pallet', 'freight_type', 'source_status', 'comment',
+            'blocking_reasons',
+        ]
+        writer = csv.DictWriter(response, fieldnames=columns)
+        writer.writeheader()
+        for row in rows:
+            values = row['source_values']
+            writer.writerow({key: safe_csv_cell(value) for key, value in {
+                'product_master_id': master.pk,
+                'product_master_sha256': master.sha256,
+                'calculator_customer': client.code,
+                'sku': row['sku'],
+                'source_row': row['source_row_number'],
+                'name': values.get('name'),
+                'description': values.get('description'),
+                'length_m': values.get('length_m'),
+                'width_m': values.get('width_m'),
+                'height_m': values.get('height_m'),
+                'weight_kg': values.get('weight_kg'),
+                'cubic_m3': values.get('cubic_m3'),
+                'quantity': values.get('quantity'),
+                'pallet': values.get('pallet'),
+                'freight_type': values.get('freight_type'),
+                'source_status': values.get('source_status'),
+                'comment': values.get('comment'),
+                'blocking_reasons': ' | '.join(row['import_warnings']),
+            }.items()})
+        return response
+
+    @staticmethod
+    def _decorate_master_history(rows, client):
+        def same_source(left, right):
+            for key in ('name', 'description', 'category', 'comment', 'source_status'):
+                if getattr(left, key) != getattr(right, key):
+                    return False
+            for key in ('length_mm', 'width_mm', 'height_mm', 'weight_kg',
+                        'cubic_m3', 'quantity', 'pallet'):
+                a, b = getattr(left, key), getattr(right, key)
+                if (a is None) != (b is None) or (a is not None and Decimal(a) != Decimal(b)):
+                    return False
+            return True
+
+        different = {row['sku']: row for row in rows if row['status'] == 'DIFFERENT'}
+        staged = {}
+        for source_row in ProductSourceRow.objects.filter(
+            external_file__client=client, external_file__file_type='PRODUCTS',
+            external_file__status='VALIDATED', product_code_normalized__in=different,
+        ).select_related('external_file').order_by('external_file__uploaded_at', 'pk'):
+            staged.setdefault(source_row.product_code_normalized, []).append(source_row)
+        original = {}
+        for decision in ProductReconciliationDecision.objects.filter(
+            external_file__client=client, product_code_normalized__in=different,
+        ).select_related('external_file').order_by('reviewed_at', 'pk'):
+            original[(decision.product_code_normalized, decision.external_file_id)] = decision
+        corrections = {}
+        for decision in ProductCorrectionDecision.objects.filter(
+            round__external_file__client=client, sku__in=different,
+            round__status__in=('DRAFT', 'APPLIED'),
+        ).select_related('round__external_file').order_by('reviewed_at', 'pk'):
+            corrections[(decision.sku, decision.round.external_file_id)] = decision
+        for sku, row in different.items():
+            source_row = next((candidate for candidate in reversed(staged.get(sku, []))
+                if same_source(candidate, row['source'])), None)
+            matching_snapshot = source_row is not None
+            key = (sku, source_row.external_file_id) if source_row else None
+            decision = original.get(key)
+            correction = corrections.get(key)
+            applied = set()
+            draft = set()
+            if decision:
+                target = applied if decision.decision_status == 'APPLIED' else draft
+                target.update(k for k, v in decision.field_decisions.items()
+                              if v in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
+            if correction:
+                target = applied if correction.round.status == 'APPLIED' else draft
+                target.update(k for k, v in correction.field_decisions.items()
+                              if v in {'SOURCE', 'OPERATIONAL', 'CUSTOM'})
+            missing = set(row['changed_fields']) - applied - draft
+            row['review_state'] = ('partial' if missing and (applied or draft) else
+                                   'needs_review' if missing else
+                                   'draft' if draft else 'applied' if applied else 'needs_review')
+            row['latest_correction_round'] = correction.round if correction else None
+            row['latest_decision'] = correction or decision
+            source = (correction.round.external_file if correction else
+                      decision.external_file if decision else
+                      source_row.external_file if matching_snapshot else None)
+            row['reconciliation_url'] = (
+                reverse('admin:imports_externaldatafile_product_reconciliation', args=[source.pk])
+                + '?' + urlencode({'q': sku}) if source else None
+            )
+
+    def get_source(self, request, object_id):
+        if getattr(self, '_cached_master_object_id', None) == object_id:
+            return self._cached_master_source
+        if request.user.is_superuser:
+            clients = Client.objects.all()
+        else:
+            try:
+                clients = allowed_clients_for(request.user)
+            except CalculatorAccessDenied as exc:
+                raise PermissionDenied from exc
+        client = get_object_or_404(clients, pk=self.client_id)
+        customer = get_object_or_404(Customer, linked_client=client, is_special=False)
+        master = get_object_or_404(ProductMaster, pk=object_id, status='VALIDATED')
+        try:
+            rows, invalid = reconciliation_rows_for_customer(master, customer, include_invalid=True)
+        except SourceImportError as exc:
+            # Do not disclose data or validation details from other Customers.
+            raise Http404('This Product Master cannot be compared for this Customer.') from exc
+        source = ExternalDataFile(
+            client=client, file_type='PRODUCTS', status='VALIDATED',
+            original_filename=master.original_filename,
+        )
+        source.master_rows = rows
+        source.invalid_rows = invalid
+        source.master = master
+        source.customer = customer
+        self._cached_master_object_id = object_id
+        self._cached_master_source = source
+        return source
+
+    def build_reconciliation(self, source):
+        if hasattr(self, '_master_rows'):
+            return self._master_rows
+        return build_workspace(
+            source, source_rows=source.master_rows, pending_rejected=0,
+            include_decisions=False,
+        )
+
+
+class ProductReconciliationWorkflow(ReadOnlyReconciliationWorkflow):
+    template_name = 'admin/imports/product_reconciliation_workspace.html'
+    page_title = 'Product reconciliation workspace'
+    page_description = (
+        'Group, review and save draft Product decisions before any operational change.'
+    )
+
+    def get_source(self, request, object_id):
+        if request.user.is_superuser:
+            sources = ExternalDataFile.objects.all()
+        else:
+            try:
+                sources = ExternalDataFile.objects.filter(client__in=allowed_clients_for(request.user))
+            except CalculatorAccessDenied:
+                raise PermissionDenied
+        return get_object_or_404(
+            sources,
+            pk=object_id,
+            file_type='PRODUCTS',
+            status='VALIDATED',
+        )
+
+    def build_reconciliation(self, source):
+        return build_product_reconciliation(source)
+
+    def has_manage_permission(self, request):
+        return request.user.is_superuser or request.user.has_perm(
+            'imports.manage_product_reconciliation'
+        )
+
+    def _correction_view(self, request, source):
+        if not self.has_manage_permission(request):
+            raise PermissionDenied
+        posted_actions = request.POST.getlist('correction_action')
+        action = posted_actions[-1] if posted_actions else ''
+        selected_id = request.POST.get('round_id') or request.GET.get('round')
+        round_obj = get_object_or_404(
+            ProductCorrectionRound, pk=selected_id, external_file=source
+        ) if selected_id else None
+        base_url = f'{request.path}?mode=correction'
+        bulk_preview = None
+        issue_report_preview = None
+        try:
+            if request.method == 'POST':
+                if action == 'export_issue_report':
+                    content, report_rows = export_product_issue_workbook(source)
+                    response = HttpResponse(
+                        content,
+                        content_type=(
+                            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                        ),
+                    )
+                    response['Content-Disposition'] = (
+                        f'attachment; filename="product-issues-{source.client.code}-'
+                        f'source-{source.pk}.xlsx"'
+                    )
+                    return response
+                if action == 'autosave_field':
+                    if not round_obj:
+                        return JsonResponse({'error': 'Select an open correction round.'}, status=400)
+                    try:
+                        decision = autosave_correction_field(
+                            round_obj.pk, sku=str(request.POST.get('sku') or '').strip(),
+                            field=request.POST.get('field'), authority=request.POST.get('authority'),
+                            notes=request.POST.get('notes'),
+                            confirm_source_dimensions=request.POST.get('confirm_source_dimensions') == 'yes',
+                            allow_reopen=request.POST.get('allow_reopen') == 'yes',
+                            actor=request.user, request=request,
+                        )
+                    except CorrectionRoundError as exc:
+                        return JsonResponse({'error': str(exc)}, status=400)
+                    updated_rows, _ = build_workspace(source)
+                    updated_progress = reconciliation_progress(source, updated_rows)
+                    return JsonResponse({'status': 'saved', 'sku': decision.sku,
+                                         'draft_count': updated_progress['draft_decisions'],
+                                         'pending_count': updated_progress['products_needing_review']})
+                if action == 'start':
+                    round_obj = start_correction_round(source.pk, actor=request.user, request=request)
+                    return redirect(f'{base_url}&round={round_obj.pk}')
+                if not round_obj:
+                    raise CorrectionRoundError('Select a correction round.')
+                if action == 'preview_issue_report':
+                    upload = request.FILES.get('issue_report')
+                    if not upload:
+                        raise ProductIssueReportError('Choose the corrected .xlsx report to preview.')
+                    issue_report_preview = preview_product_issue_workbook(source, upload)
+                    if issue_report_preview['items']:
+                        issue_report_preview['token'] = signing.dumps({
+                            'round': round_obj.pk,
+                            'source': source.pk,
+                            'items': issue_report_preview['items'],
+                        }, salt='product-issue-report', compress=True)
+                if action == 'save_issue_report_drafts':
+                    try:
+                        selection = signing.loads(
+                            request.POST.get('preview_token', ''),
+                            salt='product-issue-report', max_age=1800,
+                        )
+                    except signing.BadSignature as exc:
+                        raise ProductIssueReportError(
+                            'The report Preview expired or changed. Upload it again.'
+                        ) from exc
+                    if (
+                        selection.get('round') != round_obj.pk
+                        or selection.get('source') != source.pk
+                    ):
+                        raise ProductIssueReportError(
+                            'The report Preview belongs to another correction round.'
+                        )
+                    saved = save_product_issue_report_drafts(
+                        round_obj.pk, items=selection.get('items') or [],
+                        actor=request.user, request=request,
+                    )
+                    messages.success(
+                        request,
+                        f'{len(saved)} Product correction draft(s) imported. Products unchanged.',
+                    )
+                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
+                if action == 'preview_bulk_dimensions':
+                    if request.POST.get('select_all_eligible') == 'yes':
+                        all_rows, _ = build_workspace(source)
+                        prior_skus = set(
+                            ProductCorrectionRound.objects.filter(
+                                external_file=source, status='APPLIED',
+                            ).values_list('decisions__sku', flat=True)
+                        ) if request.POST.get('show_all') != 'yes' else set()
+                        search = str(request.POST.get('q') or '').strip().lower()
+                        skus = [
+                            row['sku'] for row in all_rows
+                            if is_zero_source_dimensions_candidate(row)
+                            and row['sku'] not in prior_skus
+                            and (not search or search in row['sku'].lower()
+                                 or search in str(row['source_values'].get('name') or '').lower())
+                        ]
+                    else:
+                        skus = request.POST.getlist('selected_skus')
+                    bulk_preview = bulk_dimension_candidates(round_obj, skus)
+                    bulk_preview['token'] = signing.dumps({
+                        'round': round_obj.pk, 'source': source.pk,
+                        'selected': list(dict.fromkeys(str(sku).strip() for sku in skus if str(sku).strip())),
+                        'eligible': bulk_preview['eligible'],
+                    }, salt='product-correction-zero-dimensions', compress=True)
+                    bulk_preview['notes'] = str(request.POST.get('notes') or '').strip()
+                if action == 'save_bulk_dimensions':
+                    try:
+                        selection = signing.loads(
+                            request.POST.get('preview_token', ''),
+                            salt='product-correction-zero-dimensions', max_age=1800,
+                        )
+                    except signing.BadSignature as exc:
+                        raise CorrectionRoundError('Preview expired or changed. Review the SKUs again.') from exc
+                    if selection.get('round') != round_obj.pk or selection.get('source') != source.pk:
+                        raise CorrectionRoundError('Preview belongs to a different correction round.')
+                    result = save_bulk_operational_dimensions(
+                        round_obj.pk, skus=selection['selected'],
+                        expected_eligible=selection['eligible'],
+                        notes=request.POST.get('notes'), actor=request.user, request=request,
+                    )
+                    messages.success(request, f"{len(result['eligible'])} dimension decision(s) saved in the draft; Products unchanged. {len(result['excluded'])} excluded.")
+                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
+                if action == 'preview_bulk_field':
+                    selected = request.POST.getlist('selected_skus')
+                    if request.POST.get('select_all_filtered') == 'yes':
+                        all_rows, _ = build_workspace(source)
+                        draft_skus = set(round_obj.decisions.values_list('sku', flat=True))
+                        corrected_skus = corrected_skus_for_source(source)
+                        filtered = filter_correction_rows(
+                            all_rows, group=request.POST.get('group'),
+                            status=request.POST.get('status'), query=request.POST.get('q'),
+                            draft_skus=draft_skus, corrected_skus=corrected_skus,
+                        )
+                        selected = [row['sku'] for row in filtered]
+                    field = request.POST.get('bulk_field', '')
+                    authority = request.POST.get('bulk_authority', '')
+                    bulk_field_preview = bulk_field_candidates(
+                        round_obj, selected, field=field, authority=authority,
+                    )
+                    bulk_field_preview.update({
+                        'field': field, 'authority': authority,
+                        'notes': str(request.POST.get('bulk_reason') or '').strip(),
+                    })
+                    bulk_field_preview['token'] = signing.dumps({
+                        'round': round_obj.pk, 'source': source.pk,
+                        'selected': list(dict.fromkeys(selected)),
+                        'eligible': bulk_field_preview['eligible'],
+                        'field': field, 'authority': authority,
+                    }, salt='product-correction-bulk-field', compress=True)
+                if action == 'save_bulk_field':
+                    try:
+                        selection = signing.loads(
+                            request.POST.get('preview_token', ''),
+                            salt='product-correction-bulk-field', max_age=1800,
+                        )
+                    except signing.BadSignature as exc:
+                        raise CorrectionRoundError('Bulk Preview expired or changed. Review the SKUs again.') from exc
+                    if selection.get('round') != round_obj.pk or selection.get('source') != source.pk:
+                        raise CorrectionRoundError('Bulk Preview belongs to another correction round.')
+                    result = save_bulk_field_decisions(
+                        round_obj.pk, skus=selection['selected'],
+                        expected_eligible=selection['eligible'],
+                        field=selection['field'], authority=selection['authority'],
+                        notes=request.POST.get('bulk_reason'), actor=request.user,
+                        request=request,
+                    )
+                    messages.success(request, f"{len(result['eligible'])} field decision(s) saved in draft; Products unchanged. {len(result['excluded'])} excluded.")
+                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
+                if action in {'save_inline', 'save_selected_inline'}:
+                    skus = (
+                        request.POST.getlist('selected_skus') if action == 'save_selected_inline'
+                        else [str(request.POST.get('inline_sku') or '').strip()]
+                    )
+                    if not skus or not all(skus) or len(skus) != len(set(skus)):
+                        raise CorrectionRoundError('Select distinct Product rows to save.')
+                    row_map = {row['sku']: row for row in build_workspace(source)[0]}
+                    entries = []
+                    for sku in skus:
+                        row = row_map.get(sku)
+                        if not row or not row.get('product') or row['status'] != 'DIFFERENT':
+                            raise CorrectionRoundError(f'{sku}: no matched Product with a remaining difference.')
+                        form = ProductReconciliationIndividualForm(
+                            request.POST, prefix=f"r{row['product'].pk}",
+                        )
+                        if not form.is_valid():
+                            raise CorrectionRoundError(f"{sku}: " + '; '.join(
+                                str(error) for errors in form.errors.values() for error in errors
+                            ))
+                        if form.cleaned_data['sku'] != sku:
+                            raise CorrectionRoundError(f'{sku}: selected SKU and form do not match.')
+                        entries.append({
+                            'sku': sku, 'field_decisions': form.field_decisions(),
+                            'custom_values': form.custom_values(),
+                            'notes': form.cleaned_data['notes'] or request.POST.get('bulk_reason'),
+                            'confirm_source_dimensions': sku in request.POST.getlist('confirmed_source_skus'),
+                            'allow_reopen': sku in request.POST.getlist('confirmed_reopen_skus'),
+                        })
+                    count = save_inline_correction_decisions(
+                        round_obj.pk, entries=entries, actor=request.user, request=request,
+                    )
+                    messages.success(request, f'{count} correction decision(s) saved in draft. Products unchanged.')
+                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
+                if action == 'save':
+                    form = ProductReconciliationIndividualForm(request.POST)
+                    if not form.is_valid():
+                        raise CorrectionRoundError('; '.join(
+                            str(error) for errors in form.errors.values() for error in errors
+                        ))
+                    saved = save_correction_decision(
+                        round_obj.pk, sku=form.cleaned_data['sku'],
+                        field_decisions=form.field_decisions(), custom_values=form.custom_values(),
+                        notes=form.cleaned_data['notes'], actor=request.user, request=request,
+                        confirm_source_dimensions=request.POST.get('confirm_source_dimensions') == 'yes',
+                    )
+                    messages.success(request, f'{saved.sku}: correction draft saved. Product unchanged.')
+                    return redirect(f'{base_url}&round={round_obj.pk}&preview=1')
+                if action == 'apply':
+                    if request.POST.get('confirm_apply') != 'yes':
+                        raise CorrectionRoundError('Confirm that you reviewed the correction Preview.')
+                    apply_correction_round(round_obj.pk, actor=request.user, request=request)
+                    messages.success(request, 'Correction round applied. Prior decisions remain in history.')
+                    return redirect(f'{request.path}?group=ALL_DIFFERENCES')
+                if action == 'rollback':
+                    if request.POST.get('confirm_rollback') != 'yes':
+                        raise CorrectionRoundError('Confirm correction round rollback.')
+                    rollback_correction_round(round_obj.pk, actor=request.user, request=request)
+                    messages.success(request, 'Correction round rolled back.')
+                    return redirect(f'{base_url}&round={round_obj.pk}')
+                if action == 'discard':
+                    if round_obj.status != 'DRAFT':
+                        raise CorrectionRoundError('Only a draft round can be discarded.')
+                    round_obj.status = 'DISCARDED'
+                    round_obj.save(update_fields=['status'])
+                    messages.success(request, 'Draft round discarded. Operational Products unchanged.')
+                    return redirect(base_url)
+                if action not in {
+                    'preview_bulk_dimensions', 'preview_bulk_field', 'preview_issue_report',
+                }:
+                    raise PermissionDenied('Unsupported correction action.')
+        except (CorrectionRoundError, ProductIssueReportError) as exc:
+            messages.error(request, str(exc))
+            return redirect(f'{base_url}&round={round_obj.pk}' if round_obj else base_url)
+
+        history = ProductCorrectionRound.objects.filter(external_file=source).order_by('-pk')
+        if not round_obj:
+            round_obj = history.filter(status='DRAFT').first() or history.first()
+        rows, summary = build_workspace(source)
+        reviewed_skus = corrected_skus_for_source(source)
+        draft_by_sku = {
+            decision.sku: decision for decision in (
+                round_obj.decisions.all() if round_obj and round_obj.status == 'DRAFT' else []
+            )
+        }
+        physical_count = sum(
+            row['status'] == 'DIFFERENT' and
+            bool(set(row['changed_fields']).intersection({'dimensions', 'weight', 'cubic'}))
+            for row in rows
+        )
+        query = str(request.GET.get('q') or request.POST.get('q') or '').strip().lower()
+        selected_group = str(request.GET.get('group') or request.POST.get('group') or 'ALL')
+        if selected_group not in CORRECTION_GROUPS:
+            selected_group = 'ALL'
+        selected_status = str(request.GET.get('status') or request.POST.get('status') or (
+            'ALL' if request.GET.get('show') == 'all' else 'OPEN'
+        ))
+        if selected_status not in CORRECTION_STATUSES:
+            selected_status = 'OPEN'
+        relevant = filter_correction_rows(
+            rows, group=selected_group, status=selected_status, query=query,
+            draft_skus=draft_by_sku, corrected_skus=reviewed_skus,
+        )
+        zero_dimensions_count = sum(
+            is_zero_source_dimensions_candidate(row) for row in rows
+        )
+        page = Paginator(relevant, self.page_size).get_page(request.GET.get('page'))
+        table_rows = []
+        if round_obj and round_obj.status == 'DRAFT' and request.GET.get('preview') != '1':
+            for row in page:
+                sku, previous = row['sku'], draft_by_sku.get(row['sku'])
+                initial = {'sku': sku, 'notes': previous.notes if previous else ''}
+                for field in RECONCILABLE_FIELDS:
+                    initial[f'{field}_authority'] = (
+                        previous.field_decisions.get(field, 'NO_CHANGE') if previous else 'NO_CHANGE'
+                    )
+                if previous:
+                    initial.update({f'custom_{key}': value for key, value in previous.custom_values.items()})
+                form = ProductReconciliationIndividualForm(
+                    initial=initial, prefix=f"r{row['product'].pk}",
+                )
+                fields, hidden_fields = correction_table_fields(row, form)
+                table_rows.append({
+                    'row': row, 'form': form, 'fields': fields, 'hidden_fields': hidden_fields,
+                    'decision': previous, 'corrected': sku in reviewed_skus,
+                    'multiple': len(fields) > 1,
+                })
+        selected_sku = str(request.GET.get('edit') or '').strip()
+        edit_row = next((row for row in relevant if row['sku'] == selected_sku), None)
+        form = None
+        decision_history = []
+        if edit_row and round_obj and round_obj.status == 'DRAFT':
+            existing = round_obj.decisions.filter(sku=selected_sku).first()
+            fields = ('name', 'description', 'dimensions', 'weight', 'cubic', 'freight_type')
+            initial = {'sku': selected_sku, 'notes': existing.notes if existing else ''}
+            for field in fields:
+                initial[f'{field}_authority'] = (
+                    existing.field_decisions.get(field, 'NO_CHANGE') if existing else 'NO_CHANGE'
+                )
+            if existing:
+                for key, value in existing.custom_values.items():
+                    initial[f'custom_{key}'] = value
+            form = ProductReconciliationIndividualForm(initial=initial)
+            initial_decision = ProductReconciliationDecision.objects.filter(
+                external_file=source, product_code_normalized=selected_sku,
+                decision_status='APPLIED',
+            ).first()
+            if initial_decision:
+                decision_history.append({
+                    'label': 'Initial Apply', 'decisions': initial_decision.field_decisions,
+                    'reason': initial_decision.notes, 'date': initial_decision.applied_at,
+                })
+            for prior in ProductCorrectionRound.objects.filter(
+                external_file=source, status='APPLIED'
+            ).order_by('pk'):
+                prior_decision = prior.decisions.filter(sku=selected_sku).first()
+                if prior_decision:
+                    decision_history.append({
+                        'label': f'Correction round {prior.pk}',
+                        'decisions': prior_decision.field_decisions,
+                        'reason': prior_decision.notes, 'date': prior.applied_at,
+                    })
+        plan = correction_preview(round_obj) if round_obj else None
+        if plan:
+            preview_changed_values(plan['items'])
+        progress = reconciliation_progress(source, rows)
+        issue_count = len(build_product_issue_rows(source))
+        return TemplateResponse(request, 'admin/imports/product_correction_round.html', {
+            **self.admin_site.each_context(request), 'title': 'Product correction rounds',
+            'source': source, 'opts': ExternalDataFile._meta,
+            'back_url': request.path, 'round': round_obj, 'history': history,
+            'page_obj': page, 'edit_row': edit_row, 'individual_form': form,
+            'plan': plan, 'preview_mode': request.GET.get('preview') == '1',
+            'summary': summary, 'query': query,
+            'physical_count': physical_count, 'reviewed_count': len(reviewed_skus),
+            'decision_history': decision_history,
+            'selected_group': selected_group,
+            'zero_dimensions_count': zero_dimensions_count,
+            'bulk_preview': bulk_preview,
+            'bulk_field_preview': bulk_field_preview if request.method == 'POST' and action == 'preview_bulk_field' else None,
+            'table_rows': table_rows, 'selected_status': selected_status,
+            'correction_groups': CORRECTION_GROUPS.items(),
+            'correction_statuses': CORRECTION_STATUSES.items(),
+            'result_count': len(relevant),
+            'progress': progress,
+            'issue_count': issue_count,
+            'issue_report_preview': issue_report_preview,
+        })
+
+    @staticmethod
+    def _redirect(request, group_key, *, edit=''):
+        query = {'group': group_key}
+        if edit:
+            query['edit'] = edit
+        return redirect(f'{request.path}?{urlencode(query)}')
+
+    @staticmethod
+    def _search_rows(rows, search):
+        if not search:
+            return rows
+        lowered = search.lower()
+        return [
+            row for row in rows
+            if lowered in row['sku'].lower()
+            or lowered in str(row['source_values'].get('name') or '').lower()
+            or lowered in str(row['operational_values'].get('name') or '').lower()
+        ]
+
+    @staticmethod
+    def _individual_initial(row):
+        decision = row.get('decision')
+        authorities = decision.field_decisions if decision else {}
+        custom = decision.custom_values if decision else {}
+        return {
+            'sku': row['sku'],
+            'name_authority': authorities.get('name', 'NO_CHANGE'),
+            'custom_name': custom.get('name', ''),
+            'description_authority': authorities.get('description', 'NO_CHANGE'),
+            'custom_description': custom.get('description', ''),
+            'dimensions_authority': authorities.get('dimensions', 'NO_CHANGE'),
+            'custom_length_m': custom.get('length_m'),
+            'custom_width_m': custom.get('width_m'),
+            'custom_height_m': custom.get('height_m'),
+            'weight_authority': authorities.get('weight', 'NO_CHANGE'),
+            'custom_weight_kg': custom.get('weight_kg'),
+            'cubic_authority': authorities.get('cubic', 'NO_CHANGE'),
+            'custom_cubic_m3': custom.get('cubic_m3'),
+            'freight_type_authority': authorities.get(
+                'freight_type',
+                'SOURCE' if row['source_values'].get('freight_type') in {'C', 'P'} else 'CUSTOM',
+            ),
+            'custom_freight_type': custom.get('freight_type', ''),
+            'notes': decision.notes if decision else '',
+        }
+
+    def _handle_post(self, request, source, rows, group_key, group_rows):
+        if not self.has_manage_permission(request):
+            raise PermissionDenied
+        action_values = request.POST.getlist('workspace_action')
+        action = str(action_values[-1] if action_values else '')
+        if has_active_product_apply(source) and action != 'rollback_apply':
+            messages.error(
+                request,
+                'This Product source has an active Apply. Roll it back before preparing or applying decisions.',
+            )
+            return self._redirect(request, group_key)
+        try:
+            if action == 'save_bulk':
+                form = ProductReconciliationBulkForm(
+                    request.POST,
+                    available_skus=[row['sku'] for row in group_rows],
+                )
+                if not form.is_valid():
+                    errors = '; '.join(
+                        message
+                        for messages_list in form.errors.values()
+                        for message in messages_list
+                    )
+                    raise ProductReconciliationWorkspaceError(
+                        errors or 'Correct the bulk decision form before saving.'
+                    )
+                scope = str(request.POST.get('scope') or 'selected')
+                skus = (
+                    [row['sku'] for row in group_rows]
+                    if scope == 'group'
+                    else form.cleaned_data['selected_skus']
+                )
+                if scope == 'group' and len(skus) > 2000:
+                    raise ProductReconciliationWorkspaceError(
+                        'This group is too large for one draft operation. '
+                        'Source-only rows already remain reference-only by default; '
+                        'otherwise select the required rows from the current page.'
+                    )
+                decisions = field_decisions_from_preset(form.cleaned_data['preset'])
+                row_action = (
+                    'DELETE'
+                    if form.cleaned_data['preset'] == 'REMOVE_OPERATIONAL'
+                    else 'UPDATE'
+                )
+                if row_action == 'DELETE' and form.cleaned_data['save_as_rule']:
+                    raise ProductReconciliationWorkspaceError(
+                        'Protected removals cannot be saved as an automatic reusable rule.'
+                    )
+                saved = save_product_reconciliation_decisions(
+                    source,
+                    skus=skus,
+                    field_decisions=decisions,
+                    notes=form.cleaned_data['notes'],
+                    actor=request.user,
+                    request=request,
+                    row_action=row_action,
+                )
+                if form.cleaned_data['save_as_rule']:
+                    save_reconciliation_rule(
+                        source,
+                        name=form.cleaned_data['rule_name'],
+                        group_key=group_key,
+                        field_decisions=decisions,
+                        actor=request.user,
+                        request=request,
+                    )
+                messages.success(
+                    request,
+                    f'{len(saved)} draft decision(s) saved. Operational Products were not changed.',
+                )
+                return self._redirect(request, group_key)
+
+            if action == 'create_recommended':
+                saved = create_recommended_product_drafts(
+                    source,
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'{len(saved)} recommended draft decision(s) prepared. '
+                    'Review the preview before Apply.',
+                )
+                return redirect(f'{request.path}?group=ALL_DIFFERENCES&mode=preview')
+
+            if action == 'reuse_memory':
+                prepared = reuse_product_memories(
+                    source,
+                    skus=request.POST.getlist('selected_skus'),
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'{len(prepared)} previous approved solution(s) prepared as drafts. '
+                    'Review the Preview before Apply.',
+                )
+                return redirect(f'{request.path}?group={group_key}&mode=preview')
+
+            if action == 'reuse_all_exact_memory':
+                prepared = reuse_all_exact_product_memories(
+                    source,
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'{len(prepared)} identical previous solution(s) prepared or refreshed '
+                    'as drafts. Review the Preview before Apply.',
+                )
+                return redirect(f'{request.path}?group=MEMORY_EXACT&mode=preview')
+
+            if action == 'adopt_memory':
+                memories = adopt_operational_product_memories(
+                    source,
+                    skus=request.POST.getlist('selected_skus'),
+                    approval_note=request.POST.get('notes'),
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'{len(memories)} current Calculator solution(s) adopted as approved memory.',
+                )
+                return self._redirect(request, group_key)
+
+            if action == 'apply_changes':
+                if request.POST.get('confirm_apply') != 'yes':
+                    raise ProductReconciliationWorkspaceError(
+                        'Confirm that you reviewed the Apply plan.'
+                    )
+                batch = apply_product_reconciliation(
+                    source.pk,
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'{len(batch["changes"])} Product change(s) applied successfully.',
+                )
+                return redirect(f'{request.path}?group=ALL_DIFFERENCES')
+
+            if action == 'rollback_apply':
+                if request.POST.get('confirm_rollback') != 'yes':
+                    raise ProductReconciliationWorkspaceError(
+                        'Confirm rollback of the latest Product Apply batch.'
+                    )
+                batch = rollback_latest_product_apply(
+                    source.pk,
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'{len(batch["changes"])} Product change(s) restored.',
+                )
+                return redirect(f'{request.path}?group=ALL_DIFFERENCES&mode=preview')
+
+            if action == 'save_individual':
+                form = ProductReconciliationIndividualForm(request.POST)
+                if not form.is_valid():
+                    errors = '; '.join(
+                        message
+                        for messages_list in form.errors.values()
+                        for message in messages_list
+                    )
+                    raise ProductReconciliationWorkspaceError(
+                        errors or 'Correct the individual decision form before saving.'
+                    )
+                saved = save_product_reconciliation_decisions(
+                    source,
+                    skus=[form.cleaned_data['sku']],
+                    field_decisions=form.field_decisions(),
+                    custom_values=form.custom_values(),
+                    notes=form.cleaned_data['notes'],
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'Draft decision saved for {saved[0].product_code_normalized}. '
+                    'Operational Products were not changed.',
+                )
+                return self._redirect(request, group_key, edit=saved[0].product_code_normalized)
+
+            if action == 'apply_rule':
+                rule = get_object_or_404(
+                    ProductReconciliationRule,
+                    pk=request.POST.get('rule_id'),
+                    client=source.client,
+                    active=True,
+                )
+                saved = apply_rule_as_draft(
+                    source,
+                    rule=rule,
+                    rows=rows,
+                    actor=request.user,
+                    request=request,
+                )
+                messages.success(
+                    request,
+                    f'Rule {rule.name} created {len(saved)} draft decision(s). '
+                    'Operational Products were not changed.',
+                )
+                return self._redirect(request, rule.group_key)
+        except (
+            ProductReconciliationWorkspaceError,
+            ProductReconciliationApplyBlocked,
+            ProductReconciliationMemoryError,
+        ) as exc:
+            messages.error(request, str(exc))
+            return self._redirect(request, group_key, edit=request.POST.get('sku', ''))
+        raise PermissionDenied('Unsupported reconciliation workspace action.')
+
+    def __call__(self, request, object_id):
+        if not self.has_permission(request):
+            raise PermissionDenied
+        source = self.get_source(request, object_id)
+        if request.GET.get('mode') == 'correction' or request.POST.get('correction_action'):
+            return self._correction_view(request, source)
+        active_apply = has_active_product_apply(source)
+        if request.method == 'GET' and self.has_manage_permission(request):
+            backfilled = backfill_applied_product_memories(
+                source,
+                actor=request.user,
+                request=request,
+            )
+            if backfilled:
+                messages.info(
+                    request,
+                    f'{len(backfilled)} previously applied Product decision(s) were '
+                    'added to reconciliation memory.',
+                )
+            prepared = []
+            if not active_apply:
+                prepared = prepare_exact_memory_drafts(
+                    source,
+                    actor=request.user,
+                    request=request,
+                )
+            if prepared:
+                messages.info(
+                    request,
+                    f'{len(prepared)} identical previously resolved issue(s) were '
+                    'prepared automatically as drafts.',
+                )
+        rows, summary = build_workspace(source)
+        progress = reconciliation_progress(source, rows)
+        blocked = summary['pending_rejected'] > 0
+        legacy_status = str(request.GET.get('status') or '').upper()
+        legacy_group = {
+            'ALL': 'ALL',
+            'NEEDS_REVIEW': 'ALL_DIFFERENCES',
+            'DIFFERENT': 'ALL_DIFFERENCES',
+            'SOURCE_ONLY': 'SOURCE_ONLY',
+            'OPERATIONAL_ONLY': 'OPERATIONAL_ONLY',
+            'DUPLICATE_SOURCE': 'DUPLICATE_SOURCE',
+            'SAME': 'SAME',
+        }.get(legacy_status, '')
+        group_key = str(
+            request.POST.get('group')
+            or request.GET.get('group')
+            or legacy_group
+            or 'ALL_DIFFERENCES'
+        ).upper()
+        if group_key not in GROUP_LABELS:
+            group_key = 'ALL_DIFFERENCES'
+        group_rows = rows_for_group(rows, group_key)
+
+        if request.method == 'POST':
+            if blocked and request.POST.get('workspace_action') != 'rollback_apply':
+                messages.error(
+                    request,
+                    'Complete rejected-row review before saving reconciliation decisions.',
+                )
+                return self._redirect(request, group_key)
+            response = self._handle_post(request, source, rows, group_key, group_rows)
+            if response is not None:
+                return response
+
+        search = str(request.GET.get('q') or '').strip()
+        review_status = str(request.GET.get('review_status') or 'ALL').upper()
+        if review_status not in RECONCILIATION_REVIEW_STATUSES:
+            review_status = 'ALL'
+        filtered = rows_for_review_status(self._search_rows(group_rows, search), review_status)
+        filtered.sort(key=lambda row: (row['sku'], row['source_row_number'] or 0))
+        page = Paginator(filtered, self.page_size).get_page(request.GET.get('page'))
+        bulk_form = ProductReconciliationBulkForm(
+            available_skus=[row['sku'] for row in page.object_list]
+        )
+
+        edit_sku = str(request.GET.get('edit') or '').strip()
+        edit_row = next((row for row in rows if row['sku'] == edit_sku), None)
+        individual_form = None
+        if edit_row:
+            individual_form = ProductReconciliationIndividualForm(
+                initial=self._individual_initial(edit_row)
+            )
+
+        apply_plan = build_product_apply_plan(source.pk)
+        preview_rows = []
+        preview_mode = str(request.GET.get('mode') or '').lower() == 'preview'
+        if preview_mode:
+            preview_rows = preview_changed_values(apply_plan['items'])
+
+        rules = ProductReconciliationRule.objects.filter(
+            client=source.client,
+            active=True,
+        ).order_by('group_key', 'name')
+        navigation_keys = (
+            'ALL_DIFFERENCES',
+            'SOURCE_DIMENSIONS_ZERO',
+            'DIMENSION_UNIT_REVIEW',
+            'MEMORY_EXACT',
+            'MEMORY_SOURCE_CHANGED',
+            'MEMORY_NEW_ISSUE',
+            'MEMORY_RULE_MATCH',
+            'FREIGHT_TYPE_REVIEW',
+            'FREIGHT_TYPE_DIFFERENCES',
+            'TEXT_ONLY',
+            'PHYSICAL_DIFFERENCES',
+            'SOURCE_ONLY',
+            'OPERATIONAL_ONLY',
+            'DUPLICATE_SOURCE',
+        )
+        group_navigation = [
+            {
+                'key': key,
+                'label': GROUP_LABELS[key],
+                'count': summary['group_counts'].get(key, 0),
+            }
+            for key in navigation_keys
+        ]
+        context = {
+            **self.admin_site.each_context(request),
+            'title': self.page_title,
+            'page_description': self.page_description,
+            'source': source,
+            'summary': summary,
+            'progress': progress,
+            'page_obj': page,
+            'search': search,
+            'review_status': review_status,
+            'review_statuses': RECONCILIATION_REVIEW_STATUSES.items(),
+            'result_count': len(filtered),
+            'group_result_count': len(group_rows),
+            'blocked': blocked,
+            'back_url': reverse('admin:imports_externaldatafile_changelist'),
+            'opts': ExternalDataFile._meta,
+            'group_labels': GROUP_LABELS,
+            'group_navigation': group_navigation,
+            'selected_group': group_key,
+            'selected_group_label': GROUP_LABELS[group_key],
+            'bulk_form': bulk_form,
+            'edit_row': edit_row,
+            'individual_form': individual_form,
+            'can_manage': self.has_manage_permission(request),
+            'can_edit': self.has_manage_permission(request) and not active_apply,
+            'active_apply': active_apply,
+            'rules': rules,
+            'preview_mode': preview_mode,
+            'preview_rows': preview_rows,
+            'apply_plan': apply_plan,
+            'latest_apply_batch': latest_product_apply_batch(source),
+        }
+        return TemplateResponse(request, self.template_name, context)

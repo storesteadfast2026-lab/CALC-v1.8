@@ -1,0 +1,89 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p><strong>Operational validation.</strong> Reviewing or downloading this diagnostic does not change quotes. Activation happens only through the explicit enable action shown after a successful validation.</p>
+<p>The cases are synthetic coverage checks across known destinations, weights and pallet/carton modes. A finding is evidence for operational review, not proof that every affected catalogue line is used by STH.</p>
+
+<h2>Source pair</h2>
+<p>Rates #{{ rates_source.pk }}: <strong>{{ rates_source.original_filename }}</strong><br><code>{{ rates_source.sha256 }}</code></p>
+{% if zones_source %}<p>Zones #{{ zones_source.pk }}: <strong>{{ zones_source.original_filename }}</strong><br><code>{{ zones_source.sha256 }}</code></p>{% endif %}
+{% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+
+{% if report %}
+<p><a class="button" href="?format=csv">Download diagnostic evidence CSV</a></p>
+<h2>Operational validation</h2>
+{% if operational_gate.activation_allowed %}
+<p class="messagelist success"><strong>PASSED.</strong> No blocking source or destination conflicts were detected. Review any warnings below.</p>
+{% if operational_pair.0.pk == rates_source.pk and operational_pair.1.pk == zones_source.pk %}
+<p class="messagelist success"><strong>OPERATIONAL STATUS: ENABLED.</strong> The calculator uses this Rates/Zones pair. Only complete paths return a price.</p>
+{% else %}
+<form method="post" action="{% url 'admin:imports_externaldatafile_rate_pair_activate' rates_source.pk %}">
+{% csrf_token %}
+<button type="submit" class="button default">Enable Rates and Zones for STH quotes</button>
+</form>
+{% endif %}
+{% else %}
+<p class="errornote"><strong>BLOCKED.</strong> This Rates/Zones pair must not replace the current operational data.</p>
+{% endif %}
+<p><strong>Rate values are not compared with the previous file.</strong> Price changes are allowed and do not cause validation failure. Missing cards, fields, unresolved routes and ambiguous destinations are reported as warnings; the system does not invent their rules, values or zones. Contact Steadfast Customer Service by phone when source information or a zone confirmation is required.</p>
+{% if operational_gate.blockers %}
+<table>
+<thead><tr><th>Carrier</th><th>Operational blocker</th><th>Detail</th></tr></thead>
+<tbody>
+{% for blocker in operational_gate.blockers %}<tr><td>{{ blocker.carrier|default:"Source pair" }}</td><td><code>{{ blocker.code }}</code></td><td>{{ blocker.detail }}</td></tr>{% endfor %}
+</tbody>
+</table>
+{% endif %}
+{% if operational_gate.warnings %}
+<h3>Warnings to resolve later</h3>
+<table>
+<thead><tr><th>Carrier</th><th>Warning</th><th>Detail</th></tr></thead>
+<tbody>
+{% for warning in operational_gate.warnings %}<tr><td>{{ warning.carrier|default:"Source pair" }}</td><td><code>{{ warning.code }}</code></td><td>{{ warning.detail }}</td></tr>{% endfor %}
+</tbody>
+</table>
+{% endif %}
+<p><small>Running the validation is read-only. Passing the gate does not itself alter quotes; only the explicit enable action activates the source pair.</small></p>
+<h2>STH review priorities</h2>
+<p>{{ priority_references|length }} priority missing card{{ priority_references|length|pluralize }}. {% for status, count in reference_status_counts.items %}<code>{{ status }}</code>: {{ count }}{% if not forloop.last %} · {% endif %}{% endfor %}</p>
+{% for item in priority_references %}<p><strong>Card <code>{{ item.card }}</code></strong> — <code>{{ item.review_status }}</code> — {{ item.reachable_carriers|join:", " }}</p>{% empty %}<p>No missing cards currently meet the STH priority classifications.</p>{% endfor %}
+<h2>Catalogue summary</h2>
+<p>Rate rows: {{ report.rates.rows }} · Master cards: {{ report.rates.masters }} · Zone rows: {{ report.zones.rows }} · Carriers in Zones: {{ report.zones.carriers }}</p>
+<p>Missing referenced cards ({{ report.rates.missing_references|length }}): {% for value in report.rates.missing_references %}<code>{{ value }}</code>{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}.</p>
+{% if report.rates.missing_reference_details %}
+<table>
+<thead><tr><th>Missing card</th><th>Review status</th><th>Structural reachability from STH roots</th><th>Referenced by</th></tr></thead>
+<tbody>
+{% for item in report.rates.missing_reference_details %}
+<tr>
+<td><code>{{ item.card }}</code></td>
+<td><code>{{ item.review_status }}</code></td>
+<td>{% if item.structurally_reachable %}{% for carrier in item.reachable_carriers %}<strong>{{ carrier }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}{% else %}Not reachable from the six configured root cards{% endif %}</td>
+<td>{% for reference in item.references %}Card <code>{{ reference.from_card }}</code>, row {{ reference.row }}{% if reference.name %}, {{ reference.name }}{% endif %}<br><small>Customer: <code>{{ reference.customer_scope }}</code>{% if reference.condition_issue %} · Condition: <code>{{ reference.condition_issue }}</code>{% endif %}{% if reference.expression %} · <code>{{ reference.expression }}</code>{% endif %}</small>{% if not forloop.last %}<br>{% endif %}{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+<p><small>Structural reachability follows every <code>run_rate</code> link without evaluating route conditions. Explicit customer selectors are assessed only against customer code <code>STH</code>; all other route logic remains unresolved unless supported by the whitelisted parser.</small></p>
+{% endif %}
+
+<h2>Carrier coverage</h2>
+<table>
+<thead><tr><th>Carrier / root</th><th>Zones</th><th>Synthetic case status</th><th>Unresolved conditions</th></tr></thead>
+<tbody>
+{% for carrier in carriers %}
+<tr>
+<td><strong>{{ carrier.name }}</strong><br>Card <code>{{ carrier.root_card }}</code><br>{{ carrier.rows }} source rows</td>
+<td>{{ carrier.zones_with_base_price }} with base price / {{ carrier.zones_in_csv }} in CSV
+{% if carrier.zones_without_price %}<details><summary>{{ carrier.zones_without_price|length }} CSV zones without a demonstrated base price</summary>{% for zone in carrier.zones_without_price %}<code>{{ zone }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</details>{% endif %}
+{% if carrier.priced_zones_missing_from_csv %}<details><summary>{{ carrier.priced_zones_missing_from_csv|length }} priced zones absent from CSV</summary>{% for zone in carrier.priced_zones_missing_from_csv %}<code>{{ zone }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</details>{% endif %}
+</td>
+<td>{% for status, count in carrier.case_status.items %}<code>{{ status }}</code>: {{ count }}{% if not forloop.last %}<br>{% endif %}{% endfor %}<br><small>Base: {% for status, count in carrier.base_status.items %}<code>{{ status }}</code> {{ count }}{% if not forloop.last %}, {% endif %}{% endfor %}</small></td>
+<td>{% for item in carrier.unresolved %}<code>{{ item.finding }}</code>: {{ item.count }}{% if not forloop.last %}<br>{% endif %}{% empty %}None detected in the synthetic cases.{% endfor %}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
+<p><a href="{% url 'admin:imports_externaldatafile_ratecard_review' rates_source.pk %}">Back to Rates source review</a></p>
+{% endblock %}

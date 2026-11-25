@@ -1,0 +1,41 @@
+{% extends 'admin/imports/file_base.html' %}
+{% block content %}
+<div class="import-page">
+{% include 'admin/imports/file_navigation.html' with kind='Stock' active='rows' %}
+<p><strong>Read-only source reference.</strong> Customer is the source code, not necessarily a linked Calculator Customer. Quantities are signed and preserved as supplied. Missing SKU is not zero stock. Weight and cubic are unverified source references, not freight inputs.</p>
+<form method="get">
+  {{ filter_form.non_field_errors }}
+  <p>{{ filter_form.customer.label_tag }} {{ filter_form.customer }} {{ filter_form.customer.errors }}</p>
+  <p>{{ filter_form.sku.label_tag }} {{ filter_form.sku }} {{ filter_form.sku.errors }}</p>
+  <p>{{ filter_form.serial_no.label_tag }} {{ filter_form.serial_no }} {{ filter_form.serial_no.errors }}</p>
+  <button class="button" type="submit">Filter</button>
+  <a href="{% url 'admin:imports_stockmaster_global_details' master.pk %}">Clear filters / all Customers</a>
+</form>
+{% if customer_filter_active %}<p>Customer filter is active. An empty Customer value selects only rows whose source Customer was blank.</p>{% endif %}
+<p>Matching raw rows: {{ row_page.paginator.count }} · Page {{ row_page.number }} / {{ row_page.paginator.num_pages }}</p>
+<div style="overflow-x:auto">
+<table>
+  <thead><tr><th>Source row</th><th>Customer</th><th>SKU raw</th><th>SKU normalised</th><th>Description</th><th>Quantity</th><th>Category</th><th>Serial no.</th><th>Weight</th><th>Cubic</th></tr></thead>
+  <tbody>
+  {% for row in row_page %}
+  <tr>
+    <td>{{ row.source_row_number }}</td><td>{{ row.customer_code }}</td>
+    <td>{{ row.product_code_raw }}</td><td>{{ row.product_code_normalized }}</td>
+    <td>{{ row.description }}</td><td>{{ row.quantity }}</td><td>{{ row.category }}</td>
+    <td>{{ row.serial_no }}</td><td>{{ row.weight|default_if_none:'—' }}</td>
+    <td>{{ row.cubic|default_if_none:'—' }}</td>
+  </tr>
+  {% empty %}<tr><td colspan="10">No source rows match these filters.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% if row_page.has_other_pages %}
+<p>
+  {% if row_page.has_previous %}<a href="?{% if customer_filter_active %}customer={{ filter_form.customer.value|default_if_none:''|urlencode }}&amp;{% endif %}{% if filter_form.sku.value %}sku={{ filter_form.sku.value|urlencode }}&amp;{% endif %}{% if filter_form.serial_no.value %}serial_no={{ filter_form.serial_no.value|urlencode }}&amp;{% endif %}page={{ row_page.previous_page_number }}">Previous</a>{% endif %}
+  Page {{ row_page.number }} of {{ row_page.paginator.num_pages }}
+  {% if row_page.has_next %}<a href="?{% if customer_filter_active %}customer={{ filter_form.customer.value|default_if_none:''|urlencode }}&amp;{% endif %}{% if filter_form.sku.value %}sku={{ filter_form.sku.value|urlencode }}&amp;{% endif %}{% if filter_form.serial_no.value %}serial_no={{ filter_form.serial_no.value|urlencode }}&amp;{% endif %}page={{ row_page.next_page_number }}">Next</a>{% endif %}
+</p>
+{% endif %}
+<p><strong>No Apply action is provided.</strong> This screen does not change Product Master, operational Stock, Customer links, tariff configuration, or freight quotes.</p>
+</div>
+{% endblock %}

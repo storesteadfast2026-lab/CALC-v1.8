@@ -1,0 +1,65 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{{ back_url }}">Import Centre</a>
+  &rsaquo; Process from FTP
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <div class="module">
+    <h2>{{ filename }}</h2>
+    <div style="padding: 16px;">
+      <p>
+        Process the shared source already present at
+        <strong>ftp_inbox/{{ filename }}</strong> in the Docker FTP inbox.
+      </p>
+      <p>
+        No client or local file selection is required. The source will be registered
+        for every enabled operational mapping and will continue through its existing
+        validation, review and audit workflow.
+      </p>
+      {% if not is_enabled %}
+      <p class="errornote">
+        This file is not enabled in the FTP schedule. Return to the Import Centre,
+        select it and save the schedule first.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+  <div id="ftp-processing-status" class="messagelist" hidden aria-live="assertive">
+    <div class="warning" style="display:block; margin: 0 0 16px;">
+      <strong>Processing {{ filename }}…</strong><br>
+      Do not close or reload this page until processing finishes. The Import Centre
+      will open automatically with the final result.
+    </div>
+  </div>
+  <form method="post" id="ftp-process-form">
+    {% csrf_token %}
+    <div class="submit-row">
+      <input id="ftp-process-submit" type="submit" value="Process and review" class="default"{% if not is_enabled %} disabled{% endif %}>
+      <a id="ftp-process-cancel" href="{{ back_url }}" class="closelink">Cancel</a>
+    </div>
+  </form>
+</div>
+<script>
+(function () {
+  const form = document.getElementById('ftp-process-form');
+  const submit = document.getElementById('ftp-process-submit');
+  const cancel = document.getElementById('ftp-process-cancel');
+  const status = document.getElementById('ftp-processing-status');
+  form.addEventListener('submit', function () {
+    submit.disabled = true;
+    submit.value = 'Processing…';
+    cancel.hidden = true;
+    status.hidden = false;
+    document.title = 'Processing {{ filename|escapejs }}…';
+  });
+}());
+</script>
+{% endblock %}
+

@@ -1,0 +1,33 @@
+﻿{
+    "status":  "REVIEW_REQUIRED",
+    "scope":  "READ_ONLY_CUSTOMER_PRODUCT_STOCK_RECONCILIATION",
+    "production_access":  "NONE",
+    "product_sha256":  "5C6FA014225B1DBBD2CAA5B0F864F58F684D0260299910A0A164CF1B89264B3F",
+    "stock_sha256":  "889B00CF326295A873E34C8BBFFB20CD77B73AB93D5C5006A14B65AE792F35AF",
+    "customers_sha256":  "E8CC19B57D22D34ACB19591E541DE696B7E7BBC4497F3280DFC16CEBA0B262B7",
+    "customer_rows":  111,
+    "known_customer_codes":  111,
+    "duplicate_customer_codes":  0,
+    "product_rows":  38897,
+    "product_valid_keys":  38894,
+    "duplicate_product_keys":  0,
+    "product_unknown_customer_codes":  16,
+    "product_rows_empty_identifier":  3,
+    "product_rows_numeric_identifier":  0,
+    "stock_rows":  21411,
+    "stock_matched_product_rows":  19343,
+    "stock_missing_product_rows":  2036,
+    "stock_ambiguous_product_rows":  0,
+    "stock_unknown_customer_rows":  32,
+    "stock_invalid_identifier_rows":  0,
+    "stock_exception_groups":  1151,
+    "stock_exception_csv_sha256":  "D3E43DA53D40BB0BDE7B72FDE402080652E71A423E57405DE307D21DBBDEA76D",
+    "operational_tables_updated":  false,
+    "calculator_clients_created":  0,
+    "comments":  [
+                     "Product file read from confirmed live source; stock and customers copied by exact SHA-256 from previously accepted isolated test.",
+                     "Numeric Excel identifiers are not normalised or matched because formatted leading zeros may be lost.",
+                     "Product duplicates are reported as ambiguity; no records are automatically applied.",
+                     "The reference inputs are historical snapshots, not evidence that other live master files are identical."
+                 ]
+}

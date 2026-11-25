@@ -1,0 +1,5 @@
+{% extends 'admin/base_site.html' %}
+{% block extrastyle %}{{ block.super }}{% include 'admin/imports/navigation_style.html' %}{% endblock %}
+{% block breadcrumbs %}
+<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; <a href="{% url 'admin:imports_ftpimportschedule_changelist' %}">Import Centre</a> &rsaquo; {{ title }}</div>
+{% endblock %}

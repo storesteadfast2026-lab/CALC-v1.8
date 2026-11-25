@@ -1,0 +1,22 @@
+<section class="import-navigation" aria-label="{{ kind }} file navigation">
+  <p class="import-file"><strong>{{ kind }}</strong> &middot; {{ master.original_filename }} &middot; Snapshot #{{ master.pk }}</p>
+  <p><strong>File status:</strong> {{ master.get_status_display }} &middot; <strong>Received:</strong> {{ master.uploaded_at }}<br>Validation describes this copy of the file. Check Import Centre for its operational status.</p>
+  <nav class="import-toolbar" aria-label="Return navigation">
+    <a href="{% url 'admin:imports_ftpimportschedule_changelist' %}">Back to Import Centre</a>
+    {% if kind == 'Products' %}<a href="{% url 'admin:imports_productmaster_changelist' %}">Products file history</a>{% else %}<a href="{% url 'admin:imports_stockmaster_changelist' %}">Stock file history</a>{% endif %}
+  </nav>
+  <nav class="import-tabs" aria-label="{{ kind }} views">
+  {% if kind == 'Products' %}
+    <a href="{% url 'admin:imports_productmaster_change' master.pk %}" {% if active == 'summary' %}aria-current="page"{% endif %}>Summary</a>
+    <a href="{% url 'admin:imports_productmaster_change' master.pk %}?section=rows" {% if active == 'rows' %}aria-current="page"{% endif %}>File rows (preview)</a>
+    <a href="{% url 'admin:imports_productmaster_change' master.pk %}?section=compare" {% if active == 'compare' %}aria-current="page"{% endif %}>Compare with customer products</a>
+  {% else %}
+    <a href="{% url 'admin:imports_stockmaster_change' master.pk %}" {% if active == 'summary' %}aria-current="page"{% endif %}>Summary</a>
+    {% if master.status == 'VALIDATED' %}
+    <a href="{% url 'admin:imports_stockmaster_global_details' master.pk %}" {% if active == 'rows' %}aria-current="page"{% endif %}>File rows</a>
+    <a href="{% url 'admin:imports_stockmaster_global_reconciliation' master.pk %}" {% if active == 'compare' %}aria-current="page"{% endif %}>Compare with Products file</a>
+    {% else %}<span aria-disabled="true">File rows — validate first</span><span aria-disabled="true">Compare with Products file — validate first</span>{% endif %}
+  {% endif %}
+  </nav>
+  <details><summary>Technical details</summary><p><strong>SHA-256:</strong> <code>{{ master.sha256 }}</code></p><p><strong>Uploaded by:</strong> {{ master.uploaded_by|default:'—' }}</p></details>
+</section>

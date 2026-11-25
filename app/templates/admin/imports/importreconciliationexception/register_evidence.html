@@ -1,0 +1,23 @@
+{% extends "admin/base_site.html" %}
+{% block content %}
+<p>Uploads register review-only evidence. They never activate Calculator Clients or change operational Products.</p>
+{% if error %}<p class="errornote">{{ error }}</p>{% endif %}
+{% if preview %}
+  <h2>Verified evidence preview</h2>
+  <p>Exception groups: <strong>{{ preview.groups }}</strong>. Affected Stock rows: <strong>{{ preview.stock_rows }}</strong>.</p>
+  <p>Stock SHA-256: <code>{{ preview.source_stock_sha256 }}</code></p>
+  <p>Product SHA-256: <code>{{ preview.source_product_sha256 }}</code></p>
+  <p>No records have been registered yet. Confirmation preserves all existing review decisions.</p>
+  <form method="post">{% csrf_token %}
+    <input type="hidden" name="proof" value="{{ proof }}">
+    <button class="default" type="submit" name="confirm" value="1">Confirm review-only registration</button>
+  </form>
+{% else %}
+  <h2>Upload one matching evidence pair</h2>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    {{ form.as_p }}
+    <button class="default" type="submit" name="preview" value="1">Validate and preview</button>
+  </form>
+{% endif %}
+<p><a href="{% url 'admin:imports_importreconciliationexception_changelist' %}">Return to exception register</a></p>
+{% endblock %}

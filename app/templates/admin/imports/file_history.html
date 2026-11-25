@@ -1,0 +1,10 @@
+{% extends 'admin/change_list.html' %}
+{% block extrastyle %}{{ block.super }}{% include 'admin/imports/navigation_style.html' %}{% endblock %}
+{% block breadcrumbs %}
+<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; <a href="{% url 'admin:imports_ftpimportschedule_changelist' %}">Import Centre</a> &rsaquo; {% if opts.model_name == 'productmaster' %}Products{% else %}Stock{% endif %} file history</div>
+{% endblock %}
+{% block content %}
+<nav class="import-toolbar" aria-label="Return navigation"><a href="{% url 'admin:imports_ftpimportschedule_changelist' %}">Back to Import Centre</a></nav>
+<p>Open a file below to view its summary. Each entry is a separate received copy; validation does not imply operational use.</p>
+{{ block.super }}
+{% endblock %}

@@ -1,0 +1,69 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-freight_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-freight_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-freight_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-freight_user} -d ${POSTGRES_DB:-freight_platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/django/Dockerfile
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+      python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./app:/app
+      - ./sample_data:/app/sample_data
+      - ./reports:/app/reports
+      - ./uploaded_data:/app/uploaded_data
+      - ./ftp_inbox:/app/ftp_inbox:ro
+    ports:
+      - "${CALC_PORT:-8018}:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_ENGINE: postgres
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready/', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ftp_scheduler:
+    build:
+      context: .
+      dockerfile: docker/django/Dockerfile
+    restart: unless-stopped
+    command: python -u manage.py process_ftp_imports --watch --poll-seconds 60
+    volumes:
+      - ./app:/app
+      - ./sample_data:/app/sample_data
+      - ./reports:/app/reports
+      - ./uploaded_data:/app/uploaded_data
+      - ./ftp_inbox:/app/ftp_inbox:ro
+    env_file:
+      - .env
+    environment:
+      DATABASE_ENGINE: postgres
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

@@ -1,0 +1,9 @@
+Hello,
+
+Please find attached the requested freight quotation{% if estimates|length != 1 %}s{% endif %}.
+
+{% for estimate in estimates %}{{ estimate.reference }}: valid {{ estimate.valid_from|date:"d M Y" }} to {{ estimate.valid_until|date:"d M Y" }}{% if estimate.is_expired %} — EXPIRED; recalculate for current rates{% endif %}
+{% endfor %}
+
+Kind regards,
+Freight Calculator
