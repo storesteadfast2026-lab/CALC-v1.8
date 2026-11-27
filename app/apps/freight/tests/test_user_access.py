@@ -3,7 +3,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import Client as HttpClient, TestCase
 from django.urls import reverse
 
 from apps.authentication_gateway.models import CalculatorUserProfile
@@ -55,6 +55,43 @@ class FreightUserAccessTests(TestCase):
         response = self.client.get(reverse('product_autocomplete'))
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()['error'], 'Authentication required.')
+
+    def test_v1_accounts_match_calculator_access(self):
+        url = reverse('freight_accounts_api_v1')
+        self.assertEqual(self.client.get(url).status_code, 401)
+        for user, account in (
+            (self._customer(), self.sth),
+            (self._internal_selected(), self.other),
+        ):
+            with self.subTest(role=user.calculator_profile.role):
+                self.client.force_login(user)
+                self.assertEqual(self.client.get(url).json(), {
+                    'results': [{'code': account.code, 'name': account.name}],
+                })
+                self.assertEqual(self.client.post(url).status_code, 405)
+
+    def test_v1_quote_enforces_session_csrf_and_account_access(self):
+        url = reverse('quote_api_v1')
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.post(url, {}).status_code, 401)
+
+        browser = HttpClient(enforce_csrf_checks=True)
+        browser.force_login(self._customer())
+        page = browser.get(reverse('freight_calculator'))
+        token = page.cookies['csrftoken'].value
+        payload = {'client_code': self.other.code, 'lines': []}
+        self.assertEqual(browser.post(url, payload, content_type='application/json').status_code, 403)
+        response = browser.post(
+            url, payload, content_type='application/json', HTTP_X_CSRFTOKEN=token,
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()['error'], 'This user cannot access the requested client.')
+        for invalid_payload in ('[]', '{"client_code": 42}', '{"lines": null}'):
+            with self.subTest(payload=invalid_payload):
+                response = browser.post(
+                    url, invalid_payload, content_type='application/json', HTTP_X_CSRFTOKEN=token,
+                )
+                self.assertEqual(response.status_code, 400)
 
     def test_customer_page_uses_assigned_client(self):
         self.client.force_login(self._customer())

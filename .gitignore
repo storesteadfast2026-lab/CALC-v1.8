@@ -13,3 +13,6 @@ uploaded_data/*
 !uploaded_data/.gitkeep
 ftp_inbox/*
 !ftp_inbox/.gitkeep
+# Node.js dependencies
+node_modules/
+**/node_modules/

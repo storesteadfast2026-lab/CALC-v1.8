@@ -19,7 +19,7 @@ def build_authorized_freight_request(client, payload):
         raise ValidationError('The calculation payload is invalid.')
 
     preselect_sku = str(payload.get('preselect_sku', 'YES')).upper() == 'YES'
-    calculator = client.calculators.filter(active=True).order_by('-updated_at').first()
+    calculator = client.calculators.filter(active=True, archived_at__isnull=True).first()
     if not preselect_sku and not (calculator and calculator.custom_freight_enabled):
         raise ValidationError('Custom freight is not enabled for this customer.')
 

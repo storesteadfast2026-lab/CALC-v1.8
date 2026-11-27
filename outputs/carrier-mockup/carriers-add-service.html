@@ -1,0 +1,176 @@
+<style>
+  #carriers-add-preview {
+    color-scheme: light dark;
+    --surface: light-dark(#fff, #181b1d);
+    --stripe: light-dark(#eaf3f7, #26343d);
+    --head: light-dark(#f5f5f5, #23292d);
+    --ink: light-dark(#292f33, #e9eff2);
+    --quiet: light-dark(#48616e, #bdcbd3);
+    --line: light-dark(#d8e1e5, #48575f);
+    --link: light-dark(#225a76, #a6d9ed);
+    --save: light-dark(#205067, #245d77);
+    --service-space: 5px;
+    padding: 8px;
+  }
+  #carriers-add-preview .screen {
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    overflow: hidden;
+    border-radius: 4px;
+    font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+  }
+  #carriers-add-preview header, #carriers-add-preview footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px;
+    gap: 8px;
+  }
+  #carriers-add-preview h2 { margin: 0; font-size: 17px; }
+  #carriers-add-preview table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+  #carriers-add-preview th, #carriers-add-preview td { padding: 3px 6px; text-align: left; }
+  #carriers-add-preview thead { background: var(--head); }
+  #carriers-add-preview thead th { font-weight: 500; color: var(--quiet); font-size: 12px; }
+  #carriers-add-preview tbody:nth-of-type(odd) { background: var(--stripe); }
+  #carriers-add-preview tr { border-top: 1px solid var(--line); }
+  #carriers-add-preview .service td { padding-block: var(--service-space); }
+  #carriers-add-preview .type { width: 16%; }
+  #carriers-add-preview .code { width: 20%; }
+  #carriers-add-preview .active { text-align: center; width: 10%; }
+  #carriers-add-preview .actions { width: 20%; }
+  #carriers-add-preview .service .type { color: var(--quiet); font-size: 12px; }
+  #carriers-add-preview input[type=text] {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    color: inherit;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 2px 5px;
+  }
+  #carriers-add-preview input[type=checkbox] { margin: 0; accent-color: var(--save); }
+  #carriers-add-preview button { font: inherit; cursor: pointer; }
+  #carriers-add-preview .action, #carriers-add-preview a { color: var(--link); }
+  #carriers-add-preview .action {
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 12px;
+  }
+  #carriers-add-preview .add { border-color: currentColor; }
+  #carriers-add-preview .save { color: #fff; background: var(--save); border: 0; border-radius: 3px; padding: 5px 10px; }
+  #carriers-add-preview output { color: var(--quiet); font-size: 12px; }
+  @media (max-width: 420px) {
+    #carriers-add-preview th, #carriers-add-preview td { padding-inline: 3px; }
+    #carriers-add-preview .type { width: 18%; }
+    #carriers-add-preview .active { width: 12%; }
+    #carriers-add-preview .actions { width: 21%; }
+    #carriers-add-preview .arrow { display: none; }
+  }
+</style>
+<div id="carriers-add-preview" class="viz-dotted-background" aria-label="Añadir servicio en Carriers">
+  <section class="screen">
+    <header>
+      <h2>Carriers</h2>
+      <a href="#" data-configs>Client carrier configs</a>
+    </header>
+    <form>
+      <table aria-label="Carriers and services">
+        <thead>
+          <tr>
+            <th scope="col" class="type">Type</th>
+            <th scope="col" class="code">Code</th>
+            <th scope="col">Name</th>
+            <th scope="col" class="active">Active</th>
+            <th scope="col" class="actions">Actions</th>
+          </tr>
+        </thead>
+      </table>
+      <footer>
+        <button type="submit" class="save">Save changes</button>
+        <output aria-live="polite"></output>
+      </footer>
+    </form>
+  </section>
+</div>
+<script>
+  (() => {
+    const root = document.getElementById('carriers-add-preview');
+    const table = root.querySelector('table');
+    const form = root.querySelector('form');
+    const status = root.querySelector('output');
+    const records = [
+      ['COCHRN', ['ROAD']],
+      ['CUST', ['COLLECT']],
+      ['TEAMEX', ['GENERAL', 'ROAD']],
+    ];
+
+    function carrierRow(carrier) {
+      return `<tr class="carrier">
+        <td class="type">Carrier</td>
+        <td><input type="text" value="${carrier}" aria-label="${carrier} code" required></td>
+        <td><input type="text" value="${carrier}" aria-label="${carrier} name"></td>
+        <td class="active"><input type="checkbox" aria-label="${carrier} active" checked></td>
+        <td><button type="button" class="action add" aria-label="Add service to ${carrier}">+ Add service</button></td>
+      </tr>`;
+    }
+
+    function serviceRow(carrier, code) {
+      const draft = !code;
+      const label = draft ? `New service for ${carrier}` : `${carrier} ${code} service`;
+      return `<tr class="service${draft ? ' draft' : ''}">
+        <td class="type"><span class="arrow" aria-hidden="true">↳ </span>${draft ? 'New service' : 'Service'}</td>
+        <td><input type="text" value="${code}" placeholder="Code" aria-label="${label} code" maxlength="40" required></td>
+        <td><input type="text" value="${code}" placeholder="Name" aria-label="${label} name" maxlength="150"></td>
+        <td class="active"><input type="checkbox" aria-label="${label} active" checked></td>
+        <td><button type="button" class="action ${draft ? 'cancel' : 'details'}">${draft ? 'Cancel' : 'Details'}</button></td>
+      </tr>`;
+    }
+
+    for (const [carrier, services] of records) {
+      const group = table.createTBody();
+      group.dataset.carrier = carrier;
+      group.innerHTML = carrierRow(carrier) + services.map(code => serviceRow(carrier, code)).join('');
+    }
+
+    table.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      const group = button.closest('tbody');
+      if (button.matches('.add')) {
+        if (!group.querySelector('.draft')) group.insertAdjacentHTML('beforeend', serviceRow(group.dataset.carrier, ''));
+        group.querySelector('.draft input').focus();
+        status.textContent = 'Nuevo servicio para ' + group.dataset.carrier;
+      } else if (button.matches('.cancel')) {
+        button.closest('tr').remove();
+        group.querySelector('.add').focus();
+        status.textContent = 'Nuevo servicio descartado';
+      } else {
+        const code = button.closest('tr').querySelector('input').value;
+        status.textContent = `Detalle de ${group.dataset.carrier} / ${code} en la app`;
+      }
+    });
+
+    form.addEventListener('submit', event => {
+      event.preventDefault();
+      for (const row of table.querySelectorAll('.draft')) {
+        row.classList.remove('draft');
+        row.querySelector('.type').lastChild.textContent = 'Service';
+        const button = row.querySelector('button');
+        button.classList.replace('cancel', 'details');
+        button.textContent = 'Details';
+      }
+      status.textContent = 'Cambios guardados en la vista previa';
+    });
+
+    root.querySelector('[data-configs]').addEventListener('click', event => {
+      event.preventDefault();
+      status.textContent = 'Acceso a Client carrier configs en la app';
+    });
+  })();
+</script>

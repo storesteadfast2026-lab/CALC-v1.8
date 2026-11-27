@@ -1,0 +1,32 @@
+{% load i18n %}
+<tr class="carrier-service">
+  {% if row.checkbox %}<td></td>{% endif %}
+  <td class="carrier-service-code">
+    {{ service.form.non_field_errors }}
+    {{ service.form.service_code.errors }}
+    <div class="carrier-service-fields">
+      <span class="carrier-service-label">↳ {% if service.is_new %}{% translate "New service" %}{% else %}{% translate "Service" %}{% endif %}</span>
+      {% if service.form %}
+        <label class="visually-hidden" for="{{ service.form.service_code.id_for_label }}">{% translate "Service code" %} ({{ row.object.code }})</label>
+        {{ service.form.service_code }}
+      {% else %}{{ service.object.service_code }}{% endif %}
+    </div>
+  </td>
+  <td>
+    {% if service.form %}
+      {{ service.form.service_name.errors }}
+      <label class="visually-hidden" for="{{ service.form.service_name.id_for_label }}">{% translate "Service name" %} ({{ row.object.code }})</label>
+      {{ service.form.service_name }}
+    {% else %}{{ service.object.service_name }}{% endif %}
+  </td>
+  <td class="carrier-service-active">
+    {% if service.form %}
+      {{ service.form.active.errors }}
+      <label class="visually-hidden" for="{{ service.form.active.id_for_label }}">{% translate "Service active" %} ({{ row.object.code }})</label>
+      {{ service.form.active }}
+    {% else %}{{ service.object.active|yesno:"Yes,No" }}{% endif %}
+    {% if service.is_new %}
+      <button type="button" class="carrier-row-button" data-cancel-service>{% translate "Cancel" %}</button>
+    {% endif %}
+  </td>
+</tr>

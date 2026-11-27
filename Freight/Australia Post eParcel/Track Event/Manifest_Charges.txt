@@ -1,0 +1,14 @@
+Merchant	Merchant	Manifest	Manifest	Manifest	Consignment	Post	State	Country	Nbr of	Total Chrg	Total Charge	Cash to	Internal	Billing
+Location	Name	Number	Create DT	Accep DT	Number	Code			Articles	Weight (KG)	(GST Incl.)	Collect	Chargeback Acc	Doc
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008784	5001	SA	AU	00000001	          17.000	            9.25	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008785	5069	SA	AU	00000001	           1.000	            9.25	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008787	0845	NT	AU	00000001	           4.000	           32.05	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008788	0800	NT	AU	00000001	           9.000	           60.55	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008789	0800	NT	AU	00000002	           6.000	           50.20	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008790	0800	NT	AU	00000001	           2.000	           20.65	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008791	0800	NT	AU	00000001	           3.000	           26.35	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008792	0870	NT	AU	00000001	           2.000	           20.65	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008795	0880	NT	AU	00000001	          12.000	           77.65	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008798	0800	NT	AU	00000001	           3.000	            9.50	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008799	5092	SA	AU	00000001	           0.750	            9.25	            0.00		1223509574
+5091074	Aust Post-PostIT SA	P1716	12/09/2011	91/10/ 201	AYF0008801	5090	SA	AU	00000001	           2.000	            9.25	            0.00		1223509574

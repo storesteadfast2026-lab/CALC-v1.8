@@ -1,0 +1,107 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<PCMS xmlns="http://www.auspost.com.au/xml/pcms">
+  <SendPCMSManifest>
+    <header>
+      <TransactionDateTime>2006-10-13T16:30:00.0Z</TransactionDateTime>
+      <TransactionId>PCMS-9000000001</TransactionId>
+      <TransactionSequence>1</TransactionSequence>
+      <ApplicationId>MERCHANT</ApplicationId>
+    </header>
+    <body>
+      <PCMSManifest>
+        <MerchantLocationId>AWV</MerchantLocationId>
+        <ManifestNumber>332</ManifestNumber>
+        <DateSubmitted>2006-10-13T16:30:00.0Z</DateSubmitted>
+        <DateLodged>2006-10-13T16:30:00.0Z</DateLodged>
+        <PCMSConsignment>
+          <ConsignmentNumber>ZZZ1000001</ConsignmentNumber>
+          <ChargeCode>S1</ChargeCode>
+          <InternalChargebackAccount>Finance</InternalChargebackAccount>
+          <ReferenceNo1>Job #1</ReferenceNo1>
+          <ReferenceNo2>Inv++oice #1</ReferenceNo2>
+          <DeliveryName>Joe Bloggs</DeliveryName>
+          <DeliveryCompanyName>Joe's Garage</DeliveryCompanyName>
+          <DeliveryAddressLine1>Level 22</DeliveryAddressLine1>
+          <DeliveryAddressLine2>150 Lonsdale St</DeliveryAddressLine2>
+          <DeliveryAddressLine3>Off Russell St</DeliveryAddressLine3>
+          <DeliveryAddressLine4>Corner of Lonsdale St</DeliveryAddressLine4>
+          <DeliveryPhoneNumber>+61398989898</DeliveryPhoneNumber>
+          <DeliveryEmailAddress>joe.bloggs@test.com.au</DeliveryEmailAddress>
+          <DeliverySuburb>Melbourne</DeliverySuburb>
+          <DeliveryStateCode>VIC</DeliveryStateCode>
+          <DeliveryPostcode>3000</DeliveryPostcode>
+          <DeliveryCountryCode>AU</DeliveryCountryCode>
+          <DeliveryInstructions>Pick up parcel.</DeliveryInstructions>
+          <IsInternationalDelivery>false</IsInternationalDelivery>
+          <ReturnName>ZZZ Company P/L</ReturnName>
+          <ReturnAddressLine1>Level 16</ReturnAddressLine1>
+          <ReturnAddressLine2>321 Exhibition St</ReturnAddressLine2>
+          <ReturnAddressLine3>Off Latrobe St</ReturnAddressLine3>
+          <ReturnAddressLine4>Corner of Exhibition St</ReturnAddressLine4>
+          <ReturnSuburb>Melbourne</ReturnSuburb>
+          <ReturnStateCode>VIC</ReturnStateCode>
+          <ReturnPostcode>3000</ReturnPostcode>
+          <ReturnCountryCode>AU</ReturnCountryCode>
+          <CreatedDateTime>2006-10-13T16:18:32.106+11:00</CreatedDateTime>
+          <PostChargeToAccount>8830728</PostChargeToAccount>
+          <IsSignatureRequired>Y</IsSignatureRequired>
+          <CTCAmount>0.00</CTCAmount>
+          <DeliverPartConsignment>N</DeliverPartConsignment>
+          <ContainsDangerousGoods>false</ContainsDangerousGoods>
+          <PCMSDomesticArticle>
+            <ArticleNumber>ZZZ1000001010122</ArticleNumber>
+            <BarcodeArticleNumber>99700122ZZZ100000101012203000</BarcodeArticleNumber>
+            <Length>12</Length>
+            <Width>14</Width>
+            <Height>16</Height>
+            <ActualWeight>0.5</ActualWeight>
+            <CubicWeight>0.55</CubicWeight>
+            <ArticleDescription>SOAP Test Article</ArticleDescription>
+            <IsTransitCoverRequired>N</IsTransitCoverRequired>
+            <TransitCoverAmount>100.00</TransitCoverAmount>
+            <ContentsItem>
+              <GoodsDescription>SOAP Test Goods</GoodsDescription>
+              <Weight>0.5</Weight>
+              <Quantity>1</Quantity>
+              <UnitValue>100.00</UnitValue>
+              <Value>100</Value>
+            </ContentsItem>
+          </PCMSDomesticArticle>
+        </PCMSConsignment>
+        <PCMSConsignment>
+          <ConsignmentNumber>ZZZ1000002</ConsignmentNumber>
+          <ChargeCode>S1</ChargeCode>
+          <DeliveryName>J Smith</DeliveryName>
+          <DeliveryAddressLine1>1 Smith St</DeliveryAddressLine1>
+          <DeliverySuburb>Melbourne</DeliverySuburb>
+          <DeliveryStateCode>VIC</DeliveryStateCode>
+          <DeliveryPostcode>3000</DeliveryPostcode>
+          <DeliveryCountryCode>AU</DeliveryCountryCode>
+          <IsInternationalDelivery>false</IsInternationalDelivery>
+          <ReturnName>ZZZ Company P/L</ReturnName>
+          <ReturnAddressLine1>321 Exhibition St</ReturnAddressLine1>
+          <ReturnSuburb>Melbourne</ReturnSuburb>
+          <ReturnStateCode>VIC</ReturnStateCode>
+          <ReturnPostcode>3000</ReturnPostcode>
+          <ReturnCountryCode>AU</ReturnCountryCode>
+          <CreatedDateTime>2006-10-13T16:18:32.106+11:00</CreatedDateTime>
+          <PostChargeToAccount>8830728</PostChargeToAccount>
+          <IsSignatureRequired>N</IsSignatureRequired>
+          <DeliverPartConsignment>N</DeliverPartConsignment>
+          <ContainsDangerousGoods>false</ContainsDangerousGoods>
+          <PCMSDomesticArticle>
+            <ArticleNumber>ZZZ1000002011326</ArticleNumber>
+            <BarcodeArticleNumber>99700122ZZZ100000201132603000</BarcodeArticleNumber>
+            <Length>15</Length>
+            <Width>15</Width>
+            <Height>15</Height>
+            <ActualWeight>0.85</ActualWeight>
+            <CubicWeight>0.84</CubicWeight>
+            <IsTransitCoverRequired>N</IsTransitCoverRequired>
+            <ContentsItem />
+          </PCMSDomesticArticle>
+        </PCMSConsignment>
+      </PCMSManifest>
+    </body>
+  </SendPCMSManifest>
+</PCMS>

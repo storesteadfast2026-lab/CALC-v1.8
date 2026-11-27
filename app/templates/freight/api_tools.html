@@ -1,0 +1,81 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>API Console | Steadfast Freight</title>
+    <link rel="stylesheet" href="{% static 'css/app.css' %}">
+    <link rel="stylesheet" href="{% static 'css/api_tools.css' %}">
+    <script src="{% static 'freight/api_tools.js' %}" defer></script>
+</head>
+<body>
+<main class="page api-tools">
+    <header class="api-header">
+        <h1>API Console</h1>
+        <a href="{% url 'freight_calculator' %}">Back to the calculator</a>
+    </header>
+
+    <section class="api-card" aria-labelledby="quotes-title">
+        <div class="api-endpoint">
+            <h2 id="quotes-title">Freight Quote</h2>
+            <code><b class="api-method api-post">POST</b> {% url 'quote_api_v1' %}</code>
+        </div>
+        <form class="api-console" action="{% url 'quote_api_v1' %}" method="post" data-api-console>
+            {% csrf_token %}
+            <div class="api-request">
+                <label for="quote-json">JSON request</label>
+                <textarea id="quote-json" name="payload" spellcheck="false" required>{{ quote_example }}</textarea>
+            </div>
+            <button type="submit" class="api-submit">Get quote</button>
+            <div class="api-response">
+                <div class="api-response-heading">
+                    <span id="quotes-response">Response</span>
+                    <span class="api-status" role="status" data-status></span>
+                </div>
+                <pre aria-labelledby="quotes-response" tabindex="0" data-response>Send a quote request to see the result.</pre>
+            </div>
+        </form>
+        <div class="api-docs">
+            <h3>Documentation</h3>
+            <dl>
+                <dt>Request fields</dt>
+                <dd>Send <code>client_code</code>, the destination <code>suburb</code>, <code>state</code> and <code>postcode</code>, and the freight <code>lines</code>. Each catalogue line takes <code>sku</code> and <code>quantity</code>, with an optional <code>product_id</code>.</dd>
+                <dt>Options</dt>
+                <dd>Use <code>from_address_id</code> to choose the dispatch address. Set <code>tailgate</code> to <code>YES</code> or <code>NO</code>. Use <code>cubic_margin_percent</code> if the account allows a cubic margin.</dd>
+                <dt>Manual dimensions</dt>
+                <dd>If the account allows manual dimensions, set <code>preselect_sku</code> to <code>NO</code> and send <code>quantity</code>, <code>freight_type</code>, <code>length_m</code>, <code>width_m</code>, <code>height_m</code>, <code>weight_kg</code> and <code>cubic_m3</code> for each line.</dd>
+                <dt>Response</dt>
+                <dd>Each entry in <code>results</code> includes <code>carrier</code>, <code>service</code>, <code>estimate_ex_gst</code> (price excluding GST), <code>status</code> and <code>quote_status</code>. Check <code>warnings</code> for any notices. Internal users receive the cost breakdown in <code>details</code>.</dd>
+            </dl>
+        </div>
+    </section>
+
+    <section class="api-card" aria-labelledby="accounts-title">
+        <div class="api-endpoint">
+            <h2 id="accounts-title">Freight Accounts</h2>
+            <code><b class="api-method api-get">GET</b> {% url 'freight_accounts_api_v1' %}</code>
+        </div>
+        <form class="api-console api-accounts" action="{% url 'freight_accounts_api_v1' %}" method="get" data-api-console>
+            <button type="submit" class="api-submit">List accounts</button>
+            <div class="api-response">
+                <div class="api-response-heading">
+                    <span id="accounts-response">Response</span>
+                    <span class="api-status" role="status" data-status></span>
+                </div>
+                <pre aria-labelledby="accounts-response" tabindex="0" data-response>List the freight accounts you can access.</pre>
+            </div>
+        </form>
+        <div class="api-docs">
+            <h3>Documentation</h3>
+            <p>Send the request without parameters. <code>results</code> lists the active accounts you can access, with a <code>code</code> and <code>name</code> for each. Use the account's <code>code</code> as <code>client_code</code> when requesting a quote.</p>
+        </div>
+    </section>
+
+    <section class="api-card api-docs" aria-labelledby="auth-title">
+        <h2 id="auth-title">Authentication</h2>
+        <p>This page uses your calculator session. When using another HTTP client, send the session cookie. For quote requests, set <code>Content-Type</code> to <code>application/json</code> and send the value of the <code>csrftoken</code> cookie in the <code>X-CSRFToken</code> header.</p>
+    </section>
+</main>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import os
 import tempfile
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -55,8 +56,8 @@ class FtpImportScheduleAdminTests(TestCase):
         self.assertContains(response, 'Import Centre')
         self.assertContains(response, '>Process from FTP</a>', count=6)
         self.assertContains(response, 'Check inbox now')
-        self.assertContains(response, 'Run at the scheduled time today')
-        self.assertContains(response, 'Schedule starts')
+        self.assertContains(response, 'A saved schedule change starts today')
+        self.assertNotContains(response, 'Run at the scheduled time today')
         self.assertContains(response, 'Recent imports')
         self.assertContains(response, 'Application inbox:')
         self.assertContains(response, 'File not visible', count=6)
@@ -79,8 +80,8 @@ class FtpImportScheduleAdminTests(TestCase):
     def _adelaide_time(self, day, hour, minute=0):
         return timezone.make_aware(datetime(2026, 11, day, hour, minute))
 
-    def test_schedule_change_defaults_to_next_enabled_day(self):
-        friday = self._adelaide_time(27, 14)
+    def test_past_time_on_friday_uses_next_enabled_day(self):
+        friday = self._adelaide_time(27, 15)
         monday_run = self._adelaide_time(30, 14, 16)
 
         response = self._save_schedule_at(friday)
@@ -88,18 +89,19 @@ class FtpImportScheduleAdminTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.schedule.starts_at, monday_run)
         configuration = FtpImportConfiguration.objects.get(filename='fuel.xls')
-        self.assertFalse(configuration_is_due(configuration, now=self._adelaide_time(27, 15)))
+        self.assertFalse(configuration_is_due(configuration, now=friday))
         self.assertTrue(configuration_is_due(configuration, now=monday_run))
 
-    def test_run_today_checks_again_at_the_new_time_and_keeps_retry_interval(self):
+    def test_future_time_today_checks_again_and_keeps_retry_interval(self):
         now = self._adelaide_time(25, 14, 10)
         run_time = self._adelaide_time(25, 14, 16)
-        response = self._save_schedule_at(now, run_today='on')
+        response = self._save_schedule_at(now)
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.schedule.starts_at, run_time)
-        confirmation = self.client.get(response.url)
-        self.assertContains(confirmation, 'Wed 25 Nov 2026, 14:16:00 ACDT')
+        with patch('apps.imports.admin_ftp_configuration.timezone.now', return_value=now):
+            confirmation = self.client.get(response.url)
+        self._assert_next_file_run(confirmation, run_time)
 
         configuration = FtpImportConfiguration.objects.get(filename='fuel.xls')
         configuration.last_success_at = now
@@ -113,20 +115,63 @@ class FtpImportScheduleAdminTests(TestCase):
         configuration.last_success_at = run_time
         self.assertFalse(configuration_is_due(configuration, now=run_time + timedelta(minutes=15)))
 
-        response = self._save_schedule_at(now, retry_minutes='30')
+        response = self._save_schedule_at(run_time + timedelta(minutes=5), retry_minutes='30')
         self.assertEqual(response.status_code, 302)
         self.assertEqual(self.schedule.starts_at, run_time)
 
-    def test_run_today_requires_a_future_time_on_an_enabled_day(self):
-        with self.subTest(reason='past time'):
-            response = self._save_schedule_at(self._adelaide_time(25, 15), run_today='on')
-            self.assertContains(response, 'Choose a time later than the current Adelaide time.')
-            self.assertIsNone(self.schedule.starts_at)
+    def _assert_next_file_run(self, response, expected):
+        file_rows = response.context['file_rows']
+        self.assertEqual(
+            {row['filename']: row['next_check_at'] for row in file_rows if row['enabled']},
+            {'fuel.xls': expected},
+        )
+        local_time = timezone.localtime(expected)
+        display_time = local_time.strftime('%a %d %b %Y, %H:%M:%S %Z')
+        self.assertContains(
+            response,
+            f'<time datetime="{local_time.isoformat()}">{display_time}</time>',
+            count=1, html=True,
+        )
+        self.assertContains(response, 'Next run', count=1)
+        self.assertContains(
+            response, '<span class="import-centre-disabled">Not scheduled</span>', count=5,
+        )
 
-        with self.subTest(reason='disabled day'):
-            response = self._save_schedule_at(self._adelaide_time(28, 14), run_today='on')
-            self.assertContains(response, 'Activate the schedule and enable today first.')
-            self.assertIsNone(self.schedule.starts_at)
+    def test_reopening_shows_retry_then_advances_after_success(self):
+        run_time = self._adelaide_time(25, 14, 16)
+        response = self._save_schedule_at(self._adelaide_time(25, 14, 10))
+        configuration = FtpImportConfiguration.objects.get(filename='fuel.xls')
+        configuration.last_checked_at = run_time
+        configuration.save(update_fields=['last_checked_at'])
+        now = self._adelaide_time(25, 14, 20)
+
+        with patch('apps.imports.admin_ftp_configuration.timezone.now', return_value=now):
+            self._assert_next_file_run(self.client.get(response.url), self._adelaide_time(25, 14, 31))
+            configuration.last_success_at = run_time
+            configuration.save(update_fields=['last_success_at'])
+            self._assert_next_file_run(self.client.get(response.url), self._adelaide_time(26, 14, 16))
+            self.schedule.active = False
+            self.schedule.save(update_fields=['active'])
+            paused = self.client.get(response.url)
+        self.assertContains(
+            paused, '<span class="import-centre-disabled">Not scheduled</span>', count=6,
+        )
+        self.assertNotContains(paused, 'Next run')
+
+    def test_past_or_current_time_uses_tomorrow_when_enabled(self):
+        for minute, save_minute in ((16, 16), (17, 18)):
+            with self.subTest(minute=minute, save_minute=save_minute):
+                response = self._save_schedule_at(
+                    self._adelaide_time(25, 14, save_minute), run_time=f'14:{minute}:00',
+                )
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(self.schedule.starts_at, self._adelaide_time(26, 14, minute))
+
+    def test_future_time_on_disabled_day_uses_next_enabled_day(self):
+        response = self._save_schedule_at(self._adelaide_time(28, 14))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.schedule.starts_at, self._adelaide_time(30, 14, 16))
 
     def test_schedule_page_reports_file_visible_in_configured_inbox(self):
         with tempfile.TemporaryDirectory() as temp_root:
@@ -175,6 +220,53 @@ class FtpImportScheduleAdminTests(TestCase):
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.json()['code'], 'verifying')
         self.assertFalse(status_response.json()['can_process'])
+
+    def test_completed_file_shows_processing_time_on_page_and_in_live_status(self):
+        processed_at = self._adelaide_time(26, 14, 35)
+        uploaded_at = (processed_at - timedelta(minutes=2)).timestamp()
+        with tempfile.TemporaryDirectory() as inbox:
+            source = Path(inbox) / 'products.xls'
+            source.write_bytes(b'product bytes')
+            os.utime(source, (uploaded_at, uploaded_at))
+            configuration = FtpImportConfiguration.objects.create(
+                client=self.client_record,
+                file_type='PRODUCTS',
+                filename=source.name,
+                minimum_file_age_seconds=0,
+                active=True,
+                last_checked_at=processed_at,
+                last_success_at=processed_at,
+            )
+            with (
+                override_settings(FTP_UPLOADED_DATA_DIR=inbox),
+                patch('apps.imports.admin_ftp_configuration.timezone.now', return_value=processed_at),
+            ):
+                for status, label in (
+                    ('UNCHANGED', 'Completed — unchanged'),
+                    ('NEW_SNAPSHOT', 'Completed'),
+                ):
+                    with self.subTest(status=status):
+                        configuration.last_status = status
+                        configuration.save(update_fields=['last_status'])
+                        response = self.client.get(reverse(
+                            'admin:imports_ftpimportschedule_change', args=[self.schedule.pk],
+                        ))
+                        live_status = self.client.get(reverse(
+                            'admin:imports_ftpimportschedule_file_status', args=['products'],
+                        )).json()
+                        display = 'Thu 26 Nov 2026, 14:35:00 ACDT'
+                        self.assertEqual(live_status['label'], label)
+                        self.assertContains(
+                            response, f'<span class="ftp-file-state__label">{label}</span>',
+                            html=True,
+                        )
+                        self.assertContains(
+                            response,
+                            f'<time datetime="{processed_at.isoformat()}">{display}</time>',
+                            html=True,
+                        )
+                        self.assertEqual(live_status['processed_at'], processed_at.isoformat())
+                        self.assertEqual(live_status['processed_at_display'], display)
 
     def test_stable_file_is_ready_and_process_action_is_enabled(self):
         with tempfile.TemporaryDirectory() as temp_root:

@@ -1,0 +1,130 @@
+<div id="carrier-editor-preview" class="viz-dotted-background">
+  <style>
+    #carrier-editor-preview {
+      color-scheme: light dark;
+      --surface: light-dark(#fff, #20252a);
+      --subrow: light-dark(#f5f8fa, #273139);
+      --line: light-dark(#dbe1e5, #48545d);
+      --ink: light-dark(#20292e, #eef2f5);
+      --quiet: light-dark(#495f6b, #bdccd6);
+      --blue: light-dark(#366d87, #8dcced);
+      --button: light-dark(#32647c, #a3d1e8);
+      --button-ink: light-dark(#fff, #14232b);
+      padding: 14px;
+      font: 14px/1.4 system-ui, sans-serif;
+      color: var(--ink);
+    }
+    #carrier-editor-preview * { box-sizing: border-box; }
+    #carrier-editor-preview form, #carrier-editor-preview dialog { background: var(--surface); border: 1px solid var(--line); }
+    #carrier-editor-preview .preview-top, #carrier-editor-preview footer { padding: 12px 15px; }
+    #carrier-editor-preview .preview-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; }
+    #carrier-editor-preview h2 { font-size: 18px; font-weight: 500; margin: 0; }
+    #carrier-editor-preview h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+    #carrier-editor-preview .secondary { color: var(--quiet); font-size: 12px; }
+    #carrier-editor-preview .row { display: grid; align-items: center; gap: 8px 12px; }
+    #carrier-editor-preview .carrier-row { grid-template-columns: minmax(70px, 1fr) minmax(85px, 2fr) minmax(54px, .7fr); padding: 9px 15px; }
+    #carrier-editor-preview .column-head { background: var(--subrow); border-block: 1px solid var(--line); color: var(--quiet); font-size: 12px; }
+    #carrier-editor-preview .services { margin: 0 0 0 15px; padding: 10px 15px; background: var(--subrow); border-left: 3px solid var(--line); }
+    #carrier-editor-preview .service-row { grid-template-columns: minmax(65px, .85fr) minmax(100px, 1.5fr) minmax(44px, .55fr) auto; padding: 7px 0; }
+    #carrier-editor-preview .service-row + .service-row, #carrier-editor-preview section + section { border-top: 1px solid var(--line); }
+    #carrier-editor-preview label { min-width: 0; }
+    #carrier-editor-preview label span { display: block; margin-bottom: 4px; }
+    #carrier-editor-preview input[type=text] { width: 100%; min-width: 0; border: 1px solid var(--line); padding: 5px 7px; border-radius: 3px; background: var(--surface); color: inherit; font: inherit; }
+    #carrier-editor-preview input[type=checkbox] { width: 15px; height: 15px; margin: 0; accent-color: var(--blue); }
+    #carrier-editor-preview button { font: inherit; color: var(--blue); background: var(--surface); border: 1px solid var(--line); border-radius: 3px; padding: 5px 9px; }
+    #carrier-editor-preview .service-row button { align-self: end; }
+    #carrier-editor-preview .primary { background: var(--button); color: var(--button-ink); border-color: var(--button); }
+    #carrier-editor-preview footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    #carrier-editor-preview dialog { max-width: min(380px, 90%); color: var(--ink); padding: 16px; }
+    #carrier-editor-preview dialog p { margin: 8px 0; }
+    #carrier-editor-preview dialog dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 12px 0; }
+    #carrier-editor-preview dialog dd { margin: 0; }
+    @media (max-width: 530px) {
+      #carrier-editor-preview { padding: 8px; }
+      #carrier-editor-preview .row { gap: 7px; }
+      #carrier-editor-preview .services { margin-left: 9px; padding-inline: 9px; }
+      #carrier-editor-preview .service-row { grid-template-columns: minmax(60px, 1fr) minmax(80px, 1.55fr) 44px; }
+      #carrier-editor-preview .service-row button { grid-column: 1 / -1; justify-self: start; }
+    }
+  </style>
+  <form aria-label="Carriers">
+    <header class="preview-top"><h2>Carriers</h2><small class="secondary">Servicios de ejemplo</small></header>
+    <div class="row carrier-row column-head" aria-hidden="true"><span>Code</span><span>Name</span><span>Active</span></div>
+    <section aria-label="IPEC">
+      <div class="row carrier-row">
+        <input type="text" value="IPEC" aria-label="IPEC carrier code" required>
+        <input type="text" value="IPEC" aria-label="IPEC carrier name">
+        <input type="checkbox" aria-label="IPEC carrier active" checked>
+      </div>
+      <div class="services">
+        <h3>Carrier services</h3>
+        <div class="row service-row">
+          <label><span class="secondary">Code</span><input type="text" value="ROAD" required></label>
+          <label><span class="secondary">Name</span><input type="text" value="Road Standard"></label>
+          <label><span class="secondary">Active</span><input type="checkbox" checked></label>
+          <button type="button" data-details>Change carrier service</button>
+        </div>
+        <div class="row service-row">
+          <label><span class="secondary">Code</span><input type="text" value="EXP" required></label>
+          <label><span class="secondary">Name</span><input type="text" value="Express"></label>
+          <label><span class="secondary">Active</span><input type="checkbox" checked></label>
+          <button type="button" data-details>Change carrier service</button>
+        </div>
+      </div>
+    </section>
+    <section aria-label="KTI">
+      <div class="row carrier-row">
+        <input type="text" value="KTI" aria-label="KTI carrier code" required>
+        <input type="text" value="KTI" aria-label="KTI carrier name">
+        <input type="checkbox" aria-label="KTI carrier active" checked>
+      </div>
+      <div class="services">
+        <h3>Carrier services</h3>
+        <div class="row service-row">
+          <label><span class="secondary">Code</span><input type="text" value="STD" required></label>
+          <label><span class="secondary">Name</span><input type="text" value="Standard"></label>
+          <label><span class="secondary">Active</span><input type="checkbox"></label>
+          <button type="button" data-details>Change carrier service</button>
+        </div>
+      </div>
+    </section>
+    <footer><button class="primary" type="submit">Save changes</button><output class="secondary" aria-live="polite"></output></footer>
+  </form>
+  <dialog aria-labelledby="carrier-preview-detail">
+    <h2 id="carrier-preview-detail">Change carrier service</h2>
+    <dl>
+      <dt>Code</dt><dd data-value="code"></dd>
+      <dt>Name</dt><dd data-value="name"></dd>
+      <dt>Active</dt><dd data-value="active"></dd>
+    </dl>
+    <h3>Client carrier configs</h3>
+    <p class="secondary">Aquí se verían las configuraciones de este servicio por cliente.</p>
+    <button type="button" data-close>Close</button>
+  </dialog>
+  <script>
+    (() => {
+      const preview = document.getElementById('carrier-editor-preview');
+      const form = preview.querySelector('form');
+      const message = form.querySelector('output');
+      const detail = preview.querySelector('dialog');
+      form.addEventListener('input', () => {
+        message.textContent = 'Cambios pendientes';
+      });
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        message.textContent = 'Cambios guardados en esta vista de prueba.';
+      });
+      preview.querySelectorAll('[data-details]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const row = button.closest('.service-row');
+          const [code, name, active] = row.querySelectorAll('input');
+          detail.querySelector('[data-value="code"]').textContent = code.value;
+          detail.querySelector('[data-value="name"]').textContent = name.value || '—';
+          detail.querySelector('[data-value="active"]').textContent = active.checked ? 'Yes' : 'No';
+          detail.showModal();
+        });
+      });
+      detail.querySelector('[data-close]').addEventListener('click', () => detail.close());
+    })();
+  </script>
+</div>

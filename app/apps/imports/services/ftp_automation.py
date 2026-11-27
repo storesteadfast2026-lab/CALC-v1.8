@@ -70,6 +70,36 @@ def configuration_is_due(
     return True
 
 
+def next_configuration_check(configuration, *, schedule, now):
+    """Return the first eligible check time, including a pending retry."""
+    if not configuration.active or not schedule or not schedule.active:
+        return None
+    enabled_days = {
+        day for day, field in enumerate(schedule.WEEKDAY_FIELDS) if getattr(schedule, field)
+    }
+    if not enabled_days:
+        return None
+
+    schedule_timezone = timezone.get_default_timezone()
+    first_possible = max(now, schedule.starts_at) if schedule.starts_at else now
+    day = timezone.localdate(first_possible, schedule_timezone)
+    retry_at = (
+        configuration.last_checked_at + timedelta(minutes=schedule.retry_minutes)
+        if configuration.last_checked_at else None
+    )
+    while True:
+        if day.weekday() in enabled_days:
+            run_at = timezone.make_aware(datetime.combine(day, schedule.run_time), schedule_timezone)
+            if schedule.starts_at:
+                run_at = max(run_at, schedule.starts_at)
+            if configuration_is_due(configuration, schedule=schedule, now=run_at):
+                return run_at
+            if retry_at and retry_at > run_at and timezone.localdate(retry_at, schedule_timezone) == day:
+                if configuration_is_due(configuration, schedule=schedule, now=retry_at):
+                    return retry_at
+        day += timedelta(days=1)
+
+
 def _read_configured_source(configuration: FtpImportConfiguration, *, now):
     filename = str(configuration.filename or '').strip()
     if not filename or Path(filename).name != filename or filename in {'.', '..'}:

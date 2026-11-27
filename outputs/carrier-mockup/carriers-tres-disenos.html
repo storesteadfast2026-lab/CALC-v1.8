@@ -1,0 +1,204 @@
+<style>
+  #carrier-designs {
+    --ink: light-dark(#21313a, #e3ebef);
+    --quiet: light-dark(#4e646f, #aebfc9);
+    --paper: light-dark(#fff, #1b252c);
+    --rule: light-dark(#d8e2e6, #3d505b);
+    --tint: light-dark(#eef5f7, #243640);
+    --link: light-dark(#216079, #9fdaec);
+    --strong: light-dark(#205568, #2a6077);
+  }
+  #carrier-designs [data-variant] { min-height: 26rem; }
+  #carrier-designs .carrier-screen {
+    color-scheme: light dark;
+    max-width: 58rem;
+    margin-inline: auto;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--paper);
+    color: var(--ink);
+    font: 14px/1.4 system-ui, sans-serif;
+    overflow: clip;
+  }
+  #carrier-designs .screen-head, #carrier-designs .screen-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    padding: 9px 12px;
+  }
+  #carrier-designs .screen-head { border-bottom: 1px solid var(--rule); }
+  #carrier-designs .screen-head h2 { margin: 0; font: 600 17px/1.4 system-ui, sans-serif; }
+  #carrier-designs .screen-foot { border-top: 1px solid var(--rule); }
+  #carrier-designs .save { background: var(--strong); color: #fff; border: 0; border-radius: 4px; padding: 6px 11px; font: inherit; }
+  #carrier-designs .screen-state { color: var(--quiet); font-size: 12px; }
+  #carrier-designs .screen-link { color: var(--link); text-underline-offset: 3px; white-space: nowrap; font-size: 12px; }
+  #carrier-designs .carrier-content { padding: 8px 12px; }
+  #carrier-designs .list-line {
+    display: grid;
+    grid-template-columns: 5.4rem minmax(5rem, 9rem) minmax(5rem, 1fr) 3.25rem 4.5rem;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 7px;
+  }
+  #carrier-designs .column-head { color: var(--quiet); font-size: 12px; padding-bottom: 5px; }
+  #carrier-designs .list-line > :nth-child(4) { justify-self: center; }
+  #carrier-designs .list-line > :last-child { justify-self: end; }
+  #carrier-designs input[type=text] {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 25px;
+    padding: 2px 6px;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    font: inherit;
+  }
+  #carrier-designs input[type=checkbox] { margin: 0; accent-color: var(--strong); }
+  #carrier-designs .kind { font-size: 12px; }
+  #carrier-designs .carrier-row .kind { font-weight: 650; }
+  #carrier-designs .service-row .kind { color: var(--quiet); }
+  #carrier-designs .tree .carrier-row { background: var(--tint); }
+  #carrier-designs .tree .service-row .kind { padding-inline-start: 10px; }
+  #carrier-designs .tree .group + .group { margin-top: 4px; }
+  #carrier-designs .tree .service-row .kind::before { content: '↳'; margin-inline-end: 3px; }
+  #carrier-designs .bands .group { border-inline-start: 3px solid var(--rule); padding-inline-start: 6px; }
+  #carrier-designs .bands .group + .group { margin-top: 6px; }
+  #carrier-designs .bands .carrier-row { border-bottom: 1px solid var(--rule); }
+  #carrier-designs .bands .services { padding-inline-start: 22px; }
+  #carrier-designs .bands .service-row { grid-template-columns: 4rem minmax(5rem, 9rem) minmax(5rem, 1fr) 3.25rem 4.5rem; }
+  #carrier-designs .tiles .group-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  #carrier-designs .tiles .group { border: 1px solid var(--rule); border-radius: 5px; overflow: clip; }
+  #carrier-designs .tiles .group-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 4px 7px; background: var(--tint); }
+  #carrier-designs .tiles .list-line { grid-template-columns: minmax(3.8rem, 1fr) minmax(4.3rem, 1.35fr) 2.6rem 3.7rem; gap: 5px; }
+  #carrier-designs .tiles .list-line > :nth-child(3) { justify-self: center; }
+  #carrier-designs .tiles .carrier-row { border-bottom: 1px solid var(--rule); padding-bottom: 5px; }
+  #carrier-designs .tiles .services .column-head { padding-top: 5px; }
+  #carrier-designs .tiles .service-label { grid-column: 1 / -1; }
+  #carrier-designs .carrier-screen dialog { width: min(24rem, 85%); color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 8px; }
+  #carrier-designs .carrier-screen dialog::backdrop { background: #0005; }
+  @media (max-width: 640px) {
+    #carrier-designs [data-variant] { min-height: 34rem; }
+    #carrier-designs .tiles .group-list { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    #carrier-designs .list-line, #carrier-designs .bands .service-row {
+      grid-template-columns: 3.6rem minmax(0, .9fr) minmax(0, 1.15fr) 2.5rem 3.1rem;
+      gap: 4px;
+      padding-inline: 2px;
+    }
+    #carrier-designs .carrier-content { padding-inline: 6px; }
+    #carrier-designs .tree .service-row .kind { padding-inline-start: 1px; }
+    #carrier-designs .bands .services { padding-inline-start: 4px; }
+  }
+</style>
+<div id="carrier-designs" class="viz-carousel" aria-label="Diseños de Carriers" data-previous-label="Anterior" data-next-label="Siguiente">
+  <section data-variant="Tabla jerárquica" aria-label="Tabla jerárquica"></section>
+  <section data-variant="Bloques por transportista" aria-label="Bloques por transportista" hidden></section>
+  <section data-variant="Tarjetas en dos columnas" aria-label="Tarjetas en dos columnas" hidden></section>
+</div>
+<script>
+  (() => {
+    const root = document.getElementById('carrier-designs');
+    const records = [
+      ['COCHRN', ['ROAD']],
+      ['CUST', ['COLLECT']],
+      ['KTI', ['GENERAL']],
+      ['TEAMEX', ['GENERAL', 'ROAD']],
+    ];
+
+    function fields(code, context) {
+      return `<input type="text" value="${code}" aria-label="${context} code" maxlength="40">
+        <input type="text" value="${code}" aria-label="${context} name" maxlength="150">
+        <input type="checkbox" checked aria-label="${context} active">`;
+    }
+
+    function link(label, detail) {
+      return `<a class="screen-link" href="#" data-detail="${detail}" aria-label="${detail}">${label}</a>`;
+    }
+
+    function listGroup(carrier, services, layout) {
+      const serviceRows = services.map((service, index) => `
+        <div class="list-line service-row">
+          <span class="kind">${layout === 'tree' ? 'Service' : index === 0 ? 'Services' : ''}</span>${fields(service, carrier + ' ' + service)}
+          ${link('Details', 'Change carrier service · ' + carrier + ' / ' + service)}
+        </div>`).join('');
+      return `<section class="group" aria-label="${carrier}">
+        <div class="list-line carrier-row">
+          <span class="kind">Carrier</span>${fields(carrier, carrier)}${link('Details', 'Change carrier · ' + carrier)}
+        </div>
+        <div class="services">${serviceRows}</div>
+      </section>`;
+    }
+
+    function tileGroup(carrier, services) {
+      const serviceRows = services.map(service => `
+        <div class="list-line service-row">
+          ${fields(service, carrier + ' ' + service)}${link('Details', 'Change carrier service · ' + carrier + ' / ' + service)}
+        </div>`).join('');
+      return `<section class="group" aria-label="${carrier}">
+        <div class="group-head"><strong>Carrier</strong>${link('Details', 'Change carrier · ' + carrier)}</div>
+        <div class="list-line column-head"><span>Code</span><span>Name</span><span>Active</span><span></span></div>
+        <div class="list-line carrier-row">${fields(carrier, carrier)}<span></span></div>
+        <div class="services">
+          <div class="list-line column-head"><span class="service-label">Services</span></div>
+          ${serviceRows}
+        </div>
+      </section>`;
+    }
+
+    const layouts = ['tree', 'bands', 'tiles'];
+    [...root.children].forEach((variant, index) => {
+      const layout = layouts[index];
+      const tiles = layout === 'tiles';
+      variant.innerHTML = `
+        <section class="carrier-screen ${layout}" aria-label="${variant.dataset.variant}">
+          <header class="screen-head"><h2>Carriers</h2>${link('Client carrier configs', 'Client carrier configs')}</header>
+          <form>
+            <div class="carrier-content">
+              ${tiles ? '' : '<div class="list-line column-head"><span></span><span>Code</span><span>Name</span><span>Active</span><span></span></div>'}
+              <div class="group-list">${records.map(([carrier, services]) => tiles ? tileGroup(carrier, services) : listGroup(carrier, services, layout)).join('')}</div>
+            </div>
+            <footer class="screen-foot"><button type="submit" class="save">Save changes</button><span class="screen-state" aria-live="polite"></span></footer>
+          </form>
+          <dialog aria-label="Detalle de la vista previa">
+            <p class="detail-name"></p>
+            <form method="dialog"><button type="submit">Cerrar</button></form>
+          </dialog>
+        </section>`;
+
+      const screen = variant.querySelector('.carrier-screen');
+      const form = screen.querySelector('form');
+      const status = screen.querySelector('.screen-state');
+      const dialog = screen.querySelector('dialog');
+      form.addEventListener('input', () => { status.textContent = 'Cambios pendientes'; });
+      form.addEventListener('submit', event => {
+        event.preventDefault();
+        status.textContent = 'Cambios guardados en la vista previa';
+      });
+      screen.querySelectorAll('[data-detail]').forEach(anchor => {
+        anchor.addEventListener('click', event => {
+          event.preventDefault();
+          dialog.querySelector('.detail-name').textContent = anchor.dataset.detail;
+          dialog.showModal();
+        });
+      });
+
+      if (globalThis.Tweak) {
+        const state = { spacing: 3 };
+        const tweak = new Tweak({
+          container: screen,
+          onChange: () => {
+            screen.querySelectorAll('.carrier-row, .service-row').forEach(row => {
+              row.style.paddingBlock = `${state.spacing}px`;
+            });
+          },
+        });
+        tweak.addSlider(state, 'spacing', { label: 'Espaciado de filas', min: 1, max: 8, unit: 'px' });
+      }
+    });
+  })();
+</script>

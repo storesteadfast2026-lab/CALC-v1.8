@@ -9,6 +9,9 @@ class FreightZoneAdmin(admin.ModelAdmin):
 
 @admin.register(FreightRate)
 class FreightRateAdmin(admin.ModelAdmin):
+    def has_module_permission(self, request):
+        return False
+
     list_display = ('client', 'carrier_service', 'zone', 'subzone', 'area', 'weight_break', 'freight_type', 'minimum_charge', 'basic_charge')
     list_filter = ('client', 'carrier_service', 'zone', 'freight_type')
     search_fields = ('lookup_key', 'zone', 'area')

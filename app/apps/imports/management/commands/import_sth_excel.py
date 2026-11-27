@@ -69,7 +69,11 @@ class Command(BaseCommand):
             raise CommandError(f'Workbook not found: {path}')
 
         client, _ = Client.objects.get_or_create(code=options['client'], defaults={'name': 'Stenhoj Australia'})
-        FreightCalculator.objects.get_or_create(client=client, name='STH Freight Calculator', version='V2026.R2')
+        FreightCalculator.objects.get_or_create(
+            client=client,
+            archived_at=None,
+            defaults={'name': 'STH Freight Calculator', 'version': 'V2026.R2'},
+        )
         FromAddress.objects.get_or_create(client=client, name='Default STH FROM', defaults={'suburb': '', 'state': '', 'postcode': '', 'is_default': True})
 
         operational_only = options['operational_only']

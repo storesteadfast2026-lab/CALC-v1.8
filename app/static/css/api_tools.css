@@ -1,0 +1,115 @@
+.api-tools {
+    padding-block: clamp(20px, 4vw, 42px);
+    color: #0b2349;
+}
+
+.api-header, .api-endpoint, .api-response-heading {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+}
+
+.api-header {
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.api-header h1 {
+    margin: 0;
+    font-size: clamp(24px, 4vw, 32px);
+}
+
+.api-header a { color: #174b82; }
+
+.api-card {
+    margin-bottom: 16px;
+    padding: clamp(14px, 3vw, 24px);
+    border: 1px solid #dce4ee;
+    border-radius: 12px;
+    background: #fff;
+}
+
+.api-endpoint { margin-bottom: 16px; }
+.api-endpoint h2, .api-docs h2 { margin: 0; font-size: 20px; }
+.api-endpoint code { overflow-wrap: anywhere; }
+
+.api-method {
+    display: inline-block;
+    padding: 3px 7px;
+    border-radius: 5px;
+}
+
+.api-post { background: #e5edfc; color: #123f7c; }
+.api-get { background: #e3f5ef; color: #095b48; }
+
+.api-console {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 16px;
+    align-items: start;
+}
+
+.api-accounts { grid-template-columns: minmax(0, 1fr); }
+.api-console:not(.api-accounts) .api-response { grid-column: 2; grid-row: 1; }
+.api-console:not(.api-accounts) .api-submit { grid-column: 1; grid-row: 2; }
+
+.api-request label, .api-response-heading {
+    margin-bottom: 6px;
+    min-height: 20px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.api-response-heading { justify-content: space-between; }
+.api-status { color: #235278; }
+.api-status[data-state="error"] { color: #a32d1c; }
+
+.api-console textarea, .api-console pre {
+    box-sizing: border-box;
+    width: 100%;
+    height: 19rem;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid #c8d4e2;
+    border-radius: 8px;
+    color: #0b2349;
+    font: 13px/1.55 ui-monospace, Consolas, monospace;
+    overflow: auto;
+}
+
+.api-console textarea { display: block; resize: vertical; }
+.api-console pre { background: #f5f8fc; white-space: pre-wrap; overflow-wrap: anywhere; }
+.api-accounts pre { height: auto; max-height: 190px; }
+
+.api-submit {
+    justify-self: start;
+    border-color: #174b82;
+    background: #174b82;
+    color: #fff;
+    font-weight: 600;
+}
+
+.api-submit:hover { background: #0b3562; }
+.api-submit:disabled { cursor: wait; opacity: .7; }
+.api-card :focus-visible, .api-header a:focus-visible { outline: 2px solid #2162ae; outline-offset: 2px; }
+
+.api-console + .api-docs {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid #dce4ee;
+}
+
+.api-docs h3 { margin: 0; font-size: 15px; }
+.api-docs { font-size: 14px; line-height: 1.5; }
+.api-docs code { overflow-wrap: anywhere; }
+.api-docs p { margin: 6px 0 0; }
+.api-docs dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 8px 0 0; }
+.api-docs dt { font-weight: 600; }
+.api-docs dd { margin: 0; }
+
+@media (max-width: 650px) {
+    .api-console, .api-docs dl { grid-template-columns: minmax(0, 1fr); }
+    .api-console:not(.api-accounts) .api-response { grid-column: 1; grid-row: 3; }
+    .api-docs dd { margin-bottom: 4px; }
+}

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<PCMS xmlns ="http://www.auspost.com.au/xml/pcms">
+<SendPCMSManifest>
+<header>
+<TransactionDateTime>2008-08-12T09:57:33.33Z</TransactionDateTime>
+<TransactionId>BNE-CTNNUM</TransactionId>
+<TransactionSequence>0</TransactionSequence>
+<ApplicationId>MERCHANT</ApplicationId>
+</header>
+<body>
+<PCMSManifest>
+<MerchantLocationId>AWV</MerchantLocationId>
+<ManifestNumber>BNE-01-200808111702</ManifestNumber>
+<DateSubmitted>2008-08-12T09:57:33.33Z</DateSubmitted>
+<DateLodged>2008-08-12T09:57:33.33Z</DateLodged>
+<PCMSConsignment>
+<ConsignmentNumber>DCH2015928</ConsignmentNumber>
+<ChargeCode>S2</ChargeCode>
+<InternalChargebackAccount>PostLogistics</InternalChargebackAccount>
+<DeliveryName>Katrina Mason</DeliveryName> 
+<DeliveryAddressLine1>11 Tessman St</DeliveryAddressLine1>
+<DeliveryPhoneNumber>(04)1129-7070</DeliveryPhoneNumber>
+<DeliverySuburb>Riverview</DeliverySuburb>
+<DeliveryStateCode>QLD</DeliveryStateCode>
+<DeliveryPostcode>4303</DeliveryPostcode>
+<DeliveryCountryCode>AU</DeliveryCountryCode>
+<IsInternationalDelivery>false</IsInternationalDelivery>
+<ReturnName>CHRISCO HAMPERS</ReturnName>
+<ReturnAddressLine1>1494 FERNTREE GULLY ROAD</ReturnAddressLine1>
+<ReturnAddressLine2>Phone: 1800 830 830</ReturnAddressLine2>
+<ReturnSuburb>KNOXFIELD</ReturnSuburb>
+<ReturnStateCode>VIC</ReturnStateCode>
+<ReturnPostcode>3170</ReturnPostcode>
+<ReturnCountryCode>AU</ReturnCountryCode>
+<CreatedDateTime>2008-08-12T09:57:33.33Z</CreatedDateTime>
+<PostChargeToAccount>8830728</PostChargeToAccount>
+<IsSignatureRequired>Y</IsSignatureRequired>
+<DeliverPartConsignment>N</DeliverPartConsignment>
+<ContainsDangerousGoods>false</ContainsDangerousGoods>
+<PCMSDomesticArticle>
+<ArticleNumber>DCH2015928011411</ArticleNumber>
+<BarcodeArticleNumber>99700160DCH201592801141104303</BarcodeArticleNumber>
+<ActualWeight>1</ActualWeight>
+<CubicWeight>13.21</CubicWeight>
+<ArticleDescription>Chrisco Products</ArticleDescription>
+<IsTransitCoverRequired>N</IsTransitCoverRequired>
+<ContentsItem>
+<GoodsDescription>Chrisco Products</GoodsDescription>
+<Weight>1</Weight>
+<Quantity>1</Quantity>
+</ContentsItem>
+</PCMSDomesticArticle>
+<PCMSDomesticArticle>
+<ArticleNumber>DCH2015928021427</ArticleNumber>
+<BarcodeArticleNumber>99700160DCH201592802142704303</BarcodeArticleNumber>
+<ActualWeight>1</ActualWeight>
+<CubicWeight>13.21</CubicWeight>
+<ArticleDescription>Chrisco Products</ArticleDescription>
+<IsTransitCoverRequired>N</IsTransitCoverRequired>
+<ContentsItem>
+<GoodsDescription>Chrisco Products</GoodsDescription>
+<Weight>1</Weight>
+<Quantity>1</Quantity>
+</ContentsItem>
+</PCMSDomesticArticle>
+</PCMSConsignment>
+</PCMSManifest>
+</body>
+</SendPCMSManifest>
+</PCMS>

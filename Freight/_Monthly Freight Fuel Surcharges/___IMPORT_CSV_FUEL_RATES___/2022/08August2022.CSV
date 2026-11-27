@@ -1,0 +1,40 @@
+master_rate,rate_no,from,to,rate,basic_charge,min_charge,break,item_no,group1,name
+1420,24265,,,0.14,0,0,3,1,APD,APD PRICE 30%
+29,24266,,,0.1311,0,0,3,1,APD,APD COST
+1749,25141,,,0.36,0,0,2,1,CAM,Cameron Rate Select  10%
+796,12055,,,0.29,0,0,2,1,CAM,Cameron Rate Selector COST
+1506,18073,,,0.29,0,0,3,1,COCHRN,Cochranes 20% SELECT
+1508,18082,,,0.29,0,0,3,1,COCHRN,Cochranes 15% SELECT
+85,17899,,,0.2791,0,0,3,1,COCHRN,Cochranes Select COST
+1401,24020,,,0.09,0,0,3,7,EPARCEL,eParcel Road Selector COST
+1599,24031,,,0.09,0,0,3,1,EPARCEL,eParcel Express Selector COST
+1607,24081,,,0.108,0,0,3,7,EPARCEL,eParcel Road Selector 15%
+1614,24125,,,0.108,0,0,3,1,EPARCEL,eParcel Express Selector 15%
+1393,13429,,,0.215,0,0,2,1,IPEC,IPEC Road Express 25% ave
+1423,14806,,,0.215,0,0,3,1,IPEC,IPEC Road Express 10%
+1438,15802,,,0.215,0,0,2,1,IPEC,IPEC Road Express 15%
+33,13352,,,0.213,0,0,2,1,IPEC,IPEC Road Exp Cus Sel COST
+1740,24709,,,0.465,0,0,2,1,KTI,KTI GEN Freight Price 16%
+80,23298,,,0.465,0,0,2,1,KTI,KTI GEN Freight Price 12%
+81,23291,,,0.465,0,0,2,1,KTI,KTI GEN Freight Price 25%
+82,23791,,,0.4507,0,0,2,1,KTI,KTI STH Freight - COST - GEN
+83,23797,,,0.47,0,0,2,1,KTI,KTI STH Price 25% - GEN
+84,23808,,,0.4507,0,0,2,1,KTI,KTI GEN Freight - COST
+36,11131,,,0.14,0,0,2,1,MTBAR,Mt Barker Freight 15%
+37,24602,,,0.1,0,0,2,3,MTBAR,Mt Barker Freight COST
+92,23425,,,0.233,0,0,3,1,SET,SET Container COST
+93,23434,,,0.279,0,0,3,1,SET,SET Container Price 5%
+687,23671,,,0.3265,0,0,1,1,TFMX,TFMX Fuel Surcharge COST
+688,23673,,,0.36,0,0,1,1,TFMX,TFMX Fuel Surcharge Priority
+689,23674,,,0.36,0,0,1,1,TFMX,TFMX Fuel Surcharge PRICE
+1484,17541,,,0.415,0,0,2,1,TNT,TNT Road Express 17%
+1578,23779,,,0.415,0,0,2,1,TNT,TNT Road Express 19.9% GSM
+803,16284,,,0.378,0,0,2,1,TNT,TNT Road Express COST
+806,16285,,,0.415,0,0,2,1,TNT,TNT Road Express 28%
+1596,23973,,,0.3797,0,0,1,1,TOLLEX,TOLLEX Fuel Levy S/Chg COST
+1597,23974,,,0.383,0,0,1,1,TOLLEX,TOLLEX Fuel Levy S/Chg PRICE
+1398,13663,,,0.348,0,0,2,1,TOLLPR,Toll Priority - Satchels 15%
+1400,13726,,,0.348,0,0,2,1,TOLLPR,Toll Priority - Satchels 20%
+71,17827,,,0.348,0,0,2,1,TOLLPR,Toll Priority -Leg Rate SELECT
+74,12039,,,0.3319,0,0,2,1,TOLLPR,Toll Priority - Leg Rates COST
+75,12048,,,0.3319,0,0,2,1,TOLLPR,Toll Priority - Satchels COST

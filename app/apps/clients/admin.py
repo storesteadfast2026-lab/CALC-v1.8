@@ -8,11 +8,14 @@ from pathlib import Path
 
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.views.autocomplete import AutocompleteJsonView
+from django.contrib.admin.widgets import AutocompleteSelectMultiple
 from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseNotAllowed, HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils.html import format_html
 
 from apps.authentication_gateway.services import is_django_administrator
 
@@ -27,20 +30,43 @@ from .models import Client, Customer, CustomerImport, FreightCalculator
 logger = logging.getLogger(__name__)
 
 
+class FreightCalculatorAdminForm(forms.ModelForm):
+    def clean_client(self):
+        client = self.cleaned_data['client']
+        if client.calculators.filter(archived_at__isnull=True).exclude(pk=self.instance.pk).exists():
+            raise forms.ValidationError('This client already has a freight calculator. Edit the existing one.')
+        return client
+
+    class Meta:
+        model = FreightCalculator
+        fields = '__all__'
+        help_texts = {
+            'cubic_margin_options': (
+                'Enter whole numbers from 0 to 20 in brackets, without % signs. '
+                'Use [] for 0% only, or [0, 5, 10] to offer 0%, 5% and 10%.'
+            ),
+        }
+
+
 @admin.register(FreightCalculator)
 class FreightCalculatorAdmin(admin.ModelAdmin):
+    form = FreightCalculatorAdminForm
     list_display = ('client', 'name', 'version', 'active', 'cubic_margin_enabled',
                     'custom_freight_enabled', 'visible_history_days')
     list_filter = ('active', 'cubic_margin_enabled', 'custom_freight_enabled')
     search_fields = ('client__code', 'client__name', 'name', 'version')
     autocomplete_fields = ('client',)
     fieldsets = (
-        (None, {'fields': ('client', 'name', 'version', 'calculation_engine_key', 'active')}),
+        (None, {'fields': ('client', 'name', 'version', 'active')}),
         ('Customer options', {'fields': (
             'custom_freight_enabled', 'cubic_margin_enabled',
             'cubic_margin_options', 'visible_history_days',
         )}),
+        ('Technical settings', {'fields': ('calculation_engine_key',)}),
     )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).filter(archived_at__isnull=True)
 
 
 class EnableCalculatorCustomerForm(forms.Form):
@@ -79,7 +105,7 @@ class ClientAdmin(admin.ModelAdmin):
     def add_view(self, request, form_url='', extra_context=None):
         """Require Customer selection on the existing Admin add URL, including direct POSTs."""
         if not self.has_add_permission(request) or not is_django_administrator(request.user):
-            raise PermissionDenied('Calculator Customer creation requires an administrator.')
+            raise PermissionDenied('Freight Account creation requires an administrator.')
         form = EnableCalculatorCustomerForm(request.POST or None)
         if request.method == 'POST' and form.is_valid():
             try:
@@ -89,7 +115,7 @@ class ClientAdmin(admin.ModelAdmin):
                 )
                 self.message_user(
                     request,
-                    f'Calculator Customer {client.code} {"created" if created else "linked"} from Customer {customer.code}.',
+                    f'Freight Account {client.code} {"created" if created else "linked"} from Customer {customer.code}.',
                     messages.SUCCESS,
                 )
                 return HttpResponseRedirect(reverse('admin:clients_client_change', args=[client.pk]))
@@ -97,7 +123,7 @@ class ClientAdmin(admin.ModelAdmin):
                 form.add_error('customer', str(exc))
         context = {
             **self.admin_site.each_context(request), 'opts': self.model._meta,
-            'title': 'Add Calculator Customer', 'form': form,
+            'title': 'Add Freight Account', 'form': form,
         }
         return TemplateResponse(request, self.add_form_template, context)
 
@@ -126,7 +152,6 @@ class LinkedFilter(admin.SimpleListFilter):
 
 @admin.register(Customer)
 class CustomerAdmin(admin.ModelAdmin):
-    change_list_template = 'admin/clients/customer/change_list.html'
     change_form_template = 'admin/clients/customer/change_form.html'
     list_display = ('code', 'name', 'group', 'group1', 'group2', 'wh_pick_code',
                     'source_date', 'linked_client', 'calculator_customer_status', 'is_special')
@@ -258,6 +283,10 @@ class CustomerImportAdmin(admin.ModelAdmin):
                        'duplicate_count', 'special_count', 'status', 'details')
     fields = readonly_fields
 
+    def get_model_perms(self, request):
+        # Customer import history is linked from Import Centre.
+        return {}
+
     def has_module_permission(self, request):
         return is_django_administrator(request.user)
 
@@ -278,10 +307,130 @@ class CustomerImportAdmin(admin.ModelAdmin):
 from .models import CommercialCustomer, CustomerSection
 
 
+class CommercialCustomerCodeWidget(AutocompleteSelectMultiple):
+    def get_url(self):
+        return reverse(f'{self.admin_site.name}:clients_commercialcustomer_code_search')
+
+
+class CommercialCustomerCodeSearch(AutocompleteJsonView):
+    def process_request(self, request):
+        return (
+            request.GET.get('term', ''),
+            self.admin_site.get_model_admin(Customer),
+            CustomerSection._meta.get_field('source_customer'),
+            'pk',
+        )
+
+    def get_queryset(self):
+        return super().get_queryset().filter(is_special=False).select_related(
+            'commercial_section__commercial_customer',
+        )
+
+    def serialize_result(self, obj, to_field_name):
+        result = super().serialize_result(obj, to_field_name)
+        section = getattr(obj, 'commercial_section', None)
+        if section:
+            result['text'] = f'{obj} (linked to {section.commercial_customer.code})'
+            result['disabled'] = True
+        return result
+
+
+class CustomerLinksToRemoveField(forms.ModelMultipleChoiceField):
+    def label_from_instance(self, section):
+        return f'Unlink {section.source_customer}'
+
+
+class CommercialCustomerAdminForm(forms.ModelForm):
+    customer_links_to_remove = CustomerLinksToRemoveField(
+        label='Unlink customer codes',
+        queryset=CustomerSection.objects.none(),
+        required=False,
+        widget=forms.CheckboxSelectMultiple,
+    )
+    customer_codes_to_add = forms.ModelMultipleChoiceField(
+        label='Add customer codes',
+        queryset=Customer.objects.filter(is_special=False),
+        required=False,
+        widget=CommercialCustomerCodeWidget(
+            CustomerSection._meta.get_field('source_customer'), admin.site,
+            attrs={'data-placeholder': 'Search by code or name'},
+        ),
+        help_text='Select one or more codes, then click Save.',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        field = self.fields.get('customer_links_to_remove')
+        if field is None:
+            return
+        if self.instance.pk:
+            field.queryset = self.instance.sections.select_related('source_customer')
+        if field.queryset.exists():
+            field.help_text = 'Tick the codes you want to unlink, then click Save.'
+        else:
+            field.help_text = 'No customer codes linked.'
+
+    def clean_customer_codes_to_add(self):
+        selected = self.cleaned_data['customer_codes_to_add']
+        # The admin saves the form in a transaction. Lock the source customers
+        # before checking links so simultaneous additions are checked in order.
+        customers = list(selected.select_for_update().order_by('pk'))
+        existing = {
+            section.source_customer_id: section
+            for section in CustomerSection.objects.filter(source_customer__in=customers)
+            .select_related('commercial_customer')
+        }
+        new_customers = []
+        for customer in customers:
+            section = existing.get(customer.pk)
+            if section is None:
+                new_customers.append(customer)
+            elif section.commercial_customer_id != self.instance.pk:
+                raise forms.ValidationError(
+                    '%(code)s is already linked to %(commercial_code)s.',
+                    params={'code': customer.code, 'commercial_code': section.commercial_customer.code},
+                )
+        return new_customers
+
+
 @admin.register(CommercialCustomer)
 class CommercialCustomerAdmin(admin.ModelAdmin):
+    form = CommercialCustomerAdminForm
     list_display = ('code', 'name', 'section_count')
     search_fields = ('code', 'name')
+    fieldsets = (
+        (None, {'fields': ('code', 'name', 'notes')}),
+        ('Linked customer codes', {'fields': ('customer_links_to_remove', 'customer_codes_to_add')}),
+    )
+
+    def get_urls(self):
+        return [
+            path(
+                'customer-code-search/',
+                self.admin_site.admin_view(CommercialCustomerCodeSearch.as_view(admin_site=self.admin_site)),
+                name='clients_commercialcustomer_code_search',
+            ),
+        ] + super().get_urls()
+
+    def render_change_form(self, request, context, *args, **kwargs):
+        context.update(show_save_and_continue=False, show_save_and_add_another=False)
+        return super().render_change_form(request, context, *args, **kwargs)
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        form.unlinked_customer_codes = []
+        selected_links = form.cleaned_data['customer_links_to_remove']
+        for section in selected_links.select_for_update(of=('self',)).order_by('pk'):
+            form.unlinked_customer_codes.append(str(section.source_customer))
+            section.delete()
+        for customer in form.cleaned_data['customer_codes_to_add']:
+            CustomerSection.objects.create(commercial_customer=form.instance, source_customer=customer)
+
+    def construct_change_message(self, request, form, formsets, add=False):
+        message = super().construct_change_message(request, form, formsets, add)
+        for customer_code in form.unlinked_customer_codes:
+            message.append({'deleted': {'name': 'customer code link', 'object': customer_code}})
+        return message
 
     def has_module_permission(self, request):
         return is_django_administrator(request.user)
@@ -308,10 +457,23 @@ class CustomerSectionAdmin(admin.ModelAdmin):
     list_display = ('source_customer', 'commercial_customer', 'created_at')
     list_select_related = ('source_customer', 'commercial_customer')
     search_fields = ('source_customer__code', 'commercial_customer__code')
-    readonly_fields = ('created_at',)
+    readonly_fields = ('created_at', 'unlink_customer_code')
+
+    @admin.display(description='Unlink customer code')
+    def unlink_customer_code(self, obj):
+        if not obj or not obj.pk:
+            return None
+        url = reverse(
+            f'{self.admin_site.name}:clients_commercialcustomer_change',
+            args=[obj.commercial_customer_id],
+        )
+        return format_html(
+            '<a href="{}#id_customer_links_to_remove">Unlink {} in {}</a>',
+            url, obj.source_customer.code, obj.commercial_customer.code,
+        )
 
     def has_module_permission(self, request):
-        return is_django_administrator(request.user)
+        return False
 
     def has_view_permission(self, request, obj=None):
         return is_django_administrator(request.user)

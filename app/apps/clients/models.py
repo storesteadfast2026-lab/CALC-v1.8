@@ -43,8 +43,8 @@ class Client(models.Model):
 
     class Meta:
         ordering = ['code']
-        verbose_name = 'Calculator Customer'
-        verbose_name_plural = 'Calculator Customers'
+        verbose_name = 'Freight Account'
+        verbose_name_plural = 'Freight Accounts'
 
     def __str__(self):
         return f'{self.code} - {self.name}'
@@ -61,11 +61,17 @@ class FreightCalculator(models.Model):
     cubic_margin_options = models.JSONField(default=list, blank=True)
     visible_history_days = models.PositiveSmallIntegerField(default=14)
     active = models.BooleanField(default=True)
+    archived_at = models.DateTimeField(null=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = [('client', 'name', 'version')]
+        constraints = [
+            models.UniqueConstraint(
+                fields=['client'], condition=models.Q(archived_at__isnull=True),
+                name='clients_one_current_freight_calculator',
+            ),
+        ]
 
     def __str__(self):
         return f'{self.client.code} / {self.name} {self.version}'

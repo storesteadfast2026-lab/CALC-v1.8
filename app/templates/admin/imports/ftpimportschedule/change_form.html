@@ -1,5 +1,5 @@
 {% extends "admin/change_form.html" %}
-{% load i18n admin_urls %}
+{% load i18n admin_urls tz %}
 
 {% block extrahead %}
 {{ block.super }}
@@ -53,6 +53,7 @@
   }
   .ftp-file-state__label { display: block; font-weight: 700; }
   .ftp-file-state__detail { display: block; max-width: 360px; }
+  .ftp-file-state__processed:not([hidden]) { display: block; }
   .ftp-file-state--ready .ftp-file-state__indicator,
   .ftp-file-state--success .ftp-file-state__indicator { background: #087c36; }
   .ftp-file-state--checking .ftp-file-state__indicator { background: #d98200; }
@@ -115,6 +116,13 @@
         <td>
           {% if row.enabled %}
             <span class="import-centre-enabled">Scheduled</span><br>
+            {% if row.next_check_at %}
+              {% timezone schedule_timezone %}
+                <small>{% if row.check_due %}Due now{% else %}Next run{% endif %}<br>
+                  <time datetime="{{ row.next_check_at|date:'c' }}">{{ row.next_check_at|date:"D d M Y, H:i:s T" }}</time>
+                </small><br>
+              {% endtimezone %}
+            {% endif %}
             <small>{{ row.active_client_count }} active client{{ row.active_client_count|pluralize }}</small>
           {% else %}
             <span class="import-centre-disabled">Not scheduled</span>
@@ -156,6 +164,9 @@
             <span>
               <span class="ftp-file-state__label">{{ row.ftp_status.label }}</span>
               <small class="ftp-file-state__detail">{{ row.ftp_status.detail }}</small>
+              <small class="ftp-file-state__processed"{% if not row.ftp_status.processed_at %} hidden{% endif %}>
+                Processed <time{% if row.ftp_status.processed_at %} datetime="{{ row.ftp_status.processed_at }}"{% endif %}>{{ row.ftp_status.processed_at_display }}</time>
+              </small>
             </span>
           </div>
           <a
@@ -175,6 +186,16 @@
     <span class="help">Processes all enabled client/file mappings immediately.</span>
   </div>
 </section>
+
+{% if show_customer_imports %}
+<section class="import-centre-section" aria-labelledby="customer-imports-heading">
+  <h2 id="customer-imports-heading">Customer imports</h2>
+  <p>
+    <a class="button" href="{% url 'admin:clients_customer_import' %}">Import Customers</a>
+    <a class="button" href="{% url 'admin:clients_customerimport_changelist' %}">Customer import history</a>
+  </p>
+</section>
+{% endif %}
 
 <section class="import-centre-section" aria-labelledby="recent-imports-heading">
   <h2 id="recent-imports-heading">Recent imports</h2>
@@ -214,11 +235,20 @@
   function updateWidget(widget, status) {
     const label = widget.querySelector('.ftp-file-state__label');
     const detail = widget.querySelector('.ftp-file-state__detail');
+    const processed = widget.querySelector('.ftp-file-state__processed');
+    const processedTime = processed.querySelector('time');
     const button = widget.parentElement.querySelector('.ftp-process-button');
 
     widget.className = 'ftp-file-state ftp-file-state--' + status.tone;
     label.textContent = status.label;
     detail.textContent = status.detail;
+    processed.hidden = !status.processed_at;
+    processedTime.textContent = status.processed_at_display || '';
+    if (status.processed_at) {
+      processedTime.dateTime = status.processed_at;
+    } else {
+      processedTime.removeAttribute('datetime');
+    }
     button.setAttribute('aria-disabled', status.can_process ? 'false' : 'true');
     if (status.can_process) {
       button.href = button.dataset.processUrl;

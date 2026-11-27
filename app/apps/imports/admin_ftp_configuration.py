@@ -16,13 +16,14 @@ from django.utils.html import format_html
 from apps.authentication_gateway.services import (
     CalculatorAccessDenied,
     allowed_clients_for,
+    is_django_administrator,
 )
 from apps.clients.models import Client
 from apps.imports.models import (
     ExternalDataFile, FtpImportConfiguration, FtpImportSchedule,
     ProductMaster, StockMaster,
 )
-from apps.imports.services.ftp_automation import process_ftp_configuration
+from apps.imports.services.ftp_automation import next_configuration_check, process_ftp_configuration
 from apps.imports.services.ftp_inbox import ftp_uploaded_data_root
 from apps.imports.services.ratecard_operational import get_operational_pair
 
@@ -76,14 +77,6 @@ FTP_UPLOAD_KEY_BY_TYPE = {
 
 
 class FtpImportScheduleForm(forms.ModelForm):
-    run_today = forms.BooleanField(
-        label='Run at the scheduled time today',
-        required=False,
-        help_text=(
-            'Use this for one check today, even if the files were already checked. '
-            'By default, a schedule change starts on the next enabled day.'
-        ),
-    )
     enabled_files = forms.MultipleChoiceField(
         label='Files to process',
         required=False,
@@ -101,6 +94,10 @@ class FtpImportScheduleForm(forms.ModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['run_time'].help_text = (
+            'Adelaide time. A saved schedule change starts today if today is enabled '
+            'and the time is still ahead. Otherwise it starts on the next enabled day.'
+        )
         if not self.instance.pk:
             return
         enabled = {
@@ -120,31 +117,24 @@ class FtpImportScheduleForm(forms.ModelForm):
             index for index, day in enumerate(FtpImportSchedule.WEEKDAY_FIELDS)
             if cleaned.get(day)
         }
-        if run_time is None or self.errors:
+        if run_time is None or not enabled_days or self.errors:
+            return cleaned
+
+        schedule_fields = ('run_time', 'active', *FtpImportSchedule.WEEKDAY_FIELDS)
+        if self.instance.starts_at and not any(
+            field in self.changed_data for field in schedule_fields
+        ):
             return cleaned
 
         current_time = timezone.now()
         schedule_timezone = timezone.get_default_timezone()
         today = timezone.localdate(current_time, schedule_timezone)
-        schedule_fields = ('run_time', 'active', *FtpImportSchedule.WEEKDAY_FIELDS)
-        if cleaned.get('run_today'):
-            starts_at = timezone.make_aware(
-                datetime.combine(today, run_time), schedule_timezone,
-            )
-            if not cleaned.get('active') or today.weekday() not in enabled_days:
-                self.add_error('run_today', 'Activate the schedule and enable today first.')
-            elif starts_at <= current_time:
-                self.add_error('run_today', 'Choose a time later than the current Adelaide time.')
-            else:
-                self.instance.starts_at = starts_at
-        elif enabled_days and (
-            self.instance._state.adding or any(field in self.changed_data for field in schedule_fields)
-        ):
+        starts_at = timezone.make_aware(datetime.combine(today, run_time), schedule_timezone)
+        if today.weekday() not in enabled_days or starts_at <= current_time:
             days_until_start = min((day - today.weekday() - 1) % 7 + 1 for day in enabled_days)
             start_day = today + timedelta(days=days_until_start)
-            self.instance.starts_at = timezone.make_aware(
-                datetime.combine(start_day, run_time), schedule_timezone,
-            )
+            starts_at = timezone.make_aware(datetime.combine(start_day, run_time), schedule_timezone)
+        self.instance.starts_at = starts_at
         return cleaned
 
 
@@ -158,20 +148,11 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
         'run_time',
         ('monday', 'tuesday', 'wednesday', 'thursday', 'friday'),
         ('saturday', 'sunday'),
-        'run_today',
-        'schedule_start',
         'retry_minutes',
         'enabled_files',
         'updated_at',
     )
-    readonly_fields = ('schedule_start', 'updated_at')
-
-    @admin.display(description='Schedule starts')
-    def schedule_start(self, obj):
-        if not obj or not obj.active or not obj.starts_at:
-            return None
-        starts_at = timezone.localtime(obj.starts_at, timezone.get_default_timezone())
-        return starts_at.strftime('%a %d %b %Y, %H:%M:%S %Z')
+    readonly_fields = ('updated_at',)
 
     def get_urls(self):
         custom_urls = [
@@ -451,6 +432,9 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
 
         if all_checked_after_upload and statuses <= {'NEW_SNAPSHOT', 'UNCHANGED'}:
             unchanged = statuses == {'UNCHANGED'}
+            processed_at = timezone.localtime(
+                max(item.last_checked_at for item in active_configurations),
+            )
             return {
                 **common,
                 'code': 'completed',
@@ -459,6 +443,8 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
                     'This uploaded file was already processed; no new snapshot was needed.'
                     if unchanged else 'This uploaded file was processed successfully.'
                 ),
+                'processed_at': processed_at.isoformat(),
+                'processed_at_display': processed_at.strftime('%a %d %b %Y, %H:%M:%S %Z'),
                 'tone': 'success',
                 'can_process': True,
             }
@@ -478,6 +464,8 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
     def _file_rows(self, request):
         clients = self._clients(request)
         ftp_root = ftp_uploaded_data_root()
+        schedule = FtpImportSchedule.objects.first()
+        now = timezone.now()
         configurations = FtpImportConfiguration.objects.filter(client__in=clients)
         snapshots = ExternalDataFile.objects.filter(client__in=clients)
         rows = []
@@ -489,6 +477,14 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
             )
             configuration_list = list(file_configurations)
             active_count = sum(item.active for item in configuration_list)
+            check_times = (
+                next_configuration_check(item, schedule=schedule, now=now)
+                for item in configuration_list
+            )
+            next_check_at = min(
+                (check_at for check_at in check_times if check_at is not None),
+                default=None,
+            )
             latest_configuration = max(
                 configuration_list,
                 key=lambda item: (item.last_checked_at or item.updated_at, item.pk),
@@ -517,7 +513,9 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
                     (ftp_root / filename).stat().st_size
                     if (ftp_root / filename).is_file() else 0
                 ),
-                'enabled': active_count > 0,
+                'enabled': bool(schedule and schedule.active and active_count),
+                'next_check_at': next_check_at,
+                'check_due': next_check_at is not None and next_check_at <= now,
                 'ftp_status': ftp_status,
                 'active_client_count': active_count,
                 'last_status': (
@@ -587,9 +585,11 @@ class FtpImportScheduleAdmin(admin.ModelAdmin):
                 'admin:imports_ftpimportschedule_check_inbox_now',
             ),
             'import_history_url': reverse('admin:imports_externaldatafile_changelist'),
+            'show_customer_imports': is_django_administrator(request.user),
             'title': 'Import Centre',
             'ftp_inbox_path': str(ftp_root),
             'ftp_inbox_available': ftp_root.exists() and ftp_root.is_dir(),
+            'schedule_timezone': timezone.get_default_timezone_name(),
         })
         return super().changeform_view(
             request,

@@ -1,0 +1,1 @@
+tcRequire.define("tc/footer",["tc/lib/jquery"],function(n){function t(){n(this).parent().toggleClass("is-open")}function e(e){0!==e.find(o).length&&n(i).on("click",o,t)}var o=".js-cms-footer-group",i=".cms-footer__nav";return{"init":e}});

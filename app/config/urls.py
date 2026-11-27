@@ -65,9 +65,12 @@ urlpatterns = [
     path('accounts/logout/', auth_views.LogoutView.as_view(), name='logout'),
     path('admin/', admin.site.urls),
     path('', freight_views.calculator_page, name='freight_calculator'),
+    path('api-tools/', freight_views.api_tools_page, name='api_tools'),
     path('api/suburbs/', freight_views.suburb_autocomplete, name='suburb_autocomplete'),
     path('api/products/', freight_views.product_autocomplete, name='product_autocomplete'),
     path('api/calculate/', freight_views.calculate_freight, name='calculate_freight'),
+    path('api/v1/quotes/', freight_views.calculate_freight, name='quote_api_v1'),
+    path('api/v1/freight-accounts/', freight_views.freight_accounts, name='freight_accounts_api_v1'),
     path('estimates/', include('apps.saved_estimates.urls')),
     path('api/estimates/', include('apps.saved_estimates.api_urls')),
 ]

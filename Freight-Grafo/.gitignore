@@ -1,0 +1,6 @@
+.deps/
+__pycache__/
+consulta*.sqlite*
+cobertura.json
+graphify-out/
+.mcp.json

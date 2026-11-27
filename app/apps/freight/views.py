@@ -1,10 +1,13 @@
 import json
+import logging
 
 from django.core.exceptions import PermissionDenied
 from django.conf import settings
 from django.db.models import Q
-from django.http import JsonResponse, HttpRequest
+from django.http import Http404, HttpRequest, JsonResponse
+from django.http.request import split_domain_port
 from django.shortcuts import render
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 
@@ -27,6 +30,9 @@ from .services.consolidator import PALLET_WEIGHT_KG, PALLET_CUBIC_M3
 from apps.authentication_gateway.models import CalculatorUserProfile
 
 
+logger = logging.getLogger(__name__)
+
+
 @ensure_csrf_cookie
 @calculator_access_required
 def calculator_page(request: HttpRequest):
@@ -41,7 +47,7 @@ def calculator_page(request: HttpRequest):
     available_clients = allowed_clients_for(request.user)
     from_addresses = FromAddress.objects.filter(client=client, active=True)
     profile = request.calculator_profile
-    calculator = client.calculators.filter(active=True).order_by('-updated_at').first()
+    calculator = client.calculators.filter(active=True, archived_at__isnull=True).first()
     cubic_margin_options = (
         calculator.allowed_cubic_margins()
         if calculator and calculator.cubic_margin_enabled
@@ -64,6 +70,38 @@ def calculator_page(request: HttpRequest):
         'custom_freight_enabled': bool(calculator and calculator.custom_freight_enabled),
         'cubic_margin_options': cubic_margin_options,
         'app_version': settings.APP_VERSION,
+    })
+
+
+@require_GET
+@never_cache
+def api_tools_page(request: HttpRequest):
+    if not settings.DEBUG or split_domain_port(request.get_host())[0] not in {
+        'localhost', '127.0.0.1', '[::1]',
+    }:
+        raise Http404
+    return _render_api_tools(request)
+
+
+@calculator_access_required
+def _render_api_tools(request: HttpRequest):
+    codes = list(allowed_clients_for(request.user).values_list('code', flat=True))
+    example = {
+        'client_code': codes[0] if codes else '',
+        'suburb': '',
+        'state': '',
+        'postcode': '',
+        'lines': [{'sku': '', 'quantity': 1}],
+    }
+    if 'STH' in codes:
+        # Local catalogue SKU and destination from acceptance case ACCEPT-001.
+        example.update(
+            client_code='STH', suburb='ADELAIDE', state='SA', postcode='5000',
+            lines=[{'sku': 'CM245-AS-SPKIT', 'quantity': 1}],
+        )
+
+    return render(request, 'freight/api_tools.html', {
+        'quote_example': json.dumps(example, indent=2),
     })
 
 
@@ -152,9 +190,16 @@ def product_autocomplete(request: HttpRequest):
 def calculate_freight(request: HttpRequest):
     try:
         payload = json.loads(request.body.decode('utf-8'))
+        if not isinstance(payload, dict):
+            raise ValidationError('The calculation payload must be a JSON object.')
+        client_code = payload.get('client_code')
+        if client_code is not None and not isinstance(client_code, str):
+            raise ValidationError('Client code must be a string.')
+        if not isinstance(payload.get('lines', []), list):
+            raise ValidationError('Freight lines must be an array.')
         client = resolve_authorized_client(
             request.user,
-            payload.get('client_code'),
+            client_code,
         )
         req = build_authorized_freight_request(client, payload)
         calculator = FreightCalculatorService()
@@ -182,14 +227,19 @@ def calculate_freight(request: HttpRequest):
         })
     except CalculatorAccessDenied as exc:
         return JsonResponse({'error': str(exc)}, status=403)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         return JsonResponse({'error': 'Invalid JSON request body.'}, status=400)
     except ValidationError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
     except ValueError as exc:
         return JsonResponse({'error': str(exc)}, status=400)
-    except Exception as exc:
-        return JsonResponse(
-            {'error': 'Unexpected calculation error', 'detail': str(exc)},
-            status=500,
-        )
+    except Exception:
+        logger.exception('Unexpected freight calculation error')
+        return JsonResponse({'error': 'Unexpected calculation error'}, status=500)
+
+
+@require_GET
+@calculator_access_required
+def freight_accounts(request: HttpRequest):
+    accounts = allowed_clients_for(request.user).values('code', 'name')
+    return JsonResponse({'results': list(accounts)})

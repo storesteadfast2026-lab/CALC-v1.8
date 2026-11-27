@@ -53,14 +53,10 @@ def estimates_in_visible_history(user):
     )
     configured_windows = {}
     for calculator in (
-        FreightCalculator.objects.filter(client_id__in=client_ids, active=True)
-        .order_by('client_id', '-updated_at', '-pk')
+        FreightCalculator.objects.filter(client_id__in=client_ids, active=True, archived_at__isnull=True)
         .only('client_id', 'visible_history_days')
     ):
-        configured_windows.setdefault(
-            calculator.client_id,
-            calculator.visible_history_days,
-        )
+        configured_windows[calculator.client_id] = calculator.visible_history_days
     today = timezone.localdate()
     visible = Q()
     has_clients = False

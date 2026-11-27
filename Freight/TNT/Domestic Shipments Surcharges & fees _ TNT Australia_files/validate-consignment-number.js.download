@@ -1,0 +1,1 @@
+tcRequire.define([],function(){return function(n){var e=/^([A-Z]{2})?( |-|\+)?\d(( |\+|-)?\d){7,9}( |-|\+)?([A-Z]{2})?$/i;return!!n.match(e)}});

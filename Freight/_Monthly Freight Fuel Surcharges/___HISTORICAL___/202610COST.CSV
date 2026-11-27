@@ -1,0 +1,13 @@
+carrier,surcharge,percent,current_month,current_year,name
+"APD",28.00,"%","October",2026,"COST"
+"COCHRN",50.00,"%","October",2026,"COST"
+"COURPL",16.70,"%","October",2026,"COST"
+"EPARCEL",13.50,"%","October",2026,"COST"
+"IPEC",28.07,"%","October",2026,"COST"
+"KTI",20.77,"%","October",2026,"COST"
+"SET",41.24,"%","October",2026,"COST"
+"STEA",19.00,"%","October",2026,"COST"
+"TEAMEX",39.80,"%","October",2026,"COST"
+"TEAMPR",23.95,"%","October",2026,"COST"
+"TFMX",50.91,"%","October",2026,"COST"
+"TNT",41.20,"%","October",2026,"COST"

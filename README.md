@@ -42,6 +42,29 @@ python app\manage.py runserver
 Local development uses `app/calc.sqlite3` by default. Open
 `http://127.0.0.1:8000/health/` for a health check and `/admin/` for setup.
 
+## Calculator API v1
+
+In local development, open `/api-tools/` to send requests and read both endpoint
+references on the same page. Sign in with a calculator account to use it.
+
+Use an active calculator login and send its Django session cookie with both requests.
+For `POST`, send `Content-Type: application/json` and the `csrftoken` cookie value
+from the calculator page in the `X-CSRFToken` header.
+
+- `GET /api/v1/freight-accounts/` returns `results` with the `code` and `name`
+  of each active Freight Account the user can access.
+- `POST /api/v1/quotes/` uses the calculator's JSON request format. Send the
+  account as `client_code`, the destination as `suburb`, `state` and `postcode`,
+  and the items in `lines`. Each catalogue line takes `sku` and `quantity`,
+  with an optional `product_id`. To use manual dimensions where the account
+  allows it, set `preselect_sku` to `NO` and send `quantity`, `freight_type`,
+  `length_m`, `width_m`, `height_m`, `weight_kg` and `cubic_m3` per line.
+  Optional shipment fields are `from_address_id`, `tailgate` (`YES` or `NO`)
+  and `cubic_margin_percent`. The response includes `warnings` and `results`
+  with `carrier`, `service`, `estimate_ex_gst`, `status` and `quote_status`.
+  The `details` field contains the cost breakdown for internal users. This
+  operation calculates a price without saving a quote.
+
 ## Docker setup
 
 Copy `.env.example` to `.env`, replace the secrets, then run:
